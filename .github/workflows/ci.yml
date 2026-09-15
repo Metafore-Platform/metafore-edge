@@ -119,7 +119,13 @@ jobs:
         env:
           ECR_REGISTRY: 359469026479.dkr.ecr.us-east-1.amazonaws.com
 
+      # DEPLOY GATE (repo cutover, task c70c1265-a338-47f2-a631-fea4917e56d4): the rollout runs only
+      # when the repository variable for this branch's environment is 'true' (DEPLOY_ENABLED_STAGING
+      # for staging, DEPLOY_ENABLED_PRODUCTION for main). Neither exists yet, so the image is built and
+      # pushed but nothing is rolled out. Same gate as metafore-core and metafore-ui; flip with
+      #   gh variable set DEPLOY_ENABLED_<STAGING|PRODUCTION> --repo Metafore-Platform/metafore-edge --body true
       - name: Deploy to EKS
+        if: (github.ref == 'refs/heads/main' && vars.DEPLOY_ENABLED_PRODUCTION == 'true') || (github.ref == 'refs/heads/staging' && vars.DEPLOY_ENABLED_STAGING == 'true')
         # staging: pin the edge deployment to the pushed SHA on the metafore-staging
         # cluster. main: unchanged — rollout restart re-pulls :latest on prod.
         run: |
