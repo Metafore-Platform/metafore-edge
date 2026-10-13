@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "metafore/mqtt/route_command",
+  "title": "Route Execution Command",
+  "description": "Published by Core to control/{tenant_id}/{controller_id}/routes",
+  "type": "object",
+  "required": ["action", "route_id"],
+  "properties": {
+    "action": { "type": "string", "enum": ["deploy", "execute", "remove"] },
+    "route_id": { "type": "string" },
+    "route_yaml": { "type": "string", "description": "YAML route definition (for deploy)" },
+    "parameters": {
+      "type": "object",
+      "description": "Route execution parameters including DB credentials, SQL, etc.",
+      "properties": {
+        "db_name": { "type": "string" },
+        "db_host": { "type": "string" },
+        "db_port": { "type": ["string", "integer"] },
+        "db_user": { "type": "string" },
+        "db_pass": { "type": "string" },
+        "db_type": { "type": "string", "enum": ["postgresql", "mysql", "mariadb", "mssql", "oracle"], "description": "Database the db_* fields name. Absent means postgresql; core sends it only for a non-Postgres source. The Go edge agent runs postgresql, mysql, mariadb and mssql and replies 'Unsupported db_type' to any other." },
+        "operation": { "type": "string", "description": "Parametric operation (create, update, delete, select, read, write_with_events, introspect). Its presence selects the parametric path; the Go edge agent refuses a raw 'sql' payload." },
+        "introspect": { "type": "string", "enum": ["schemas", "tables", "columns", "primary_keys", "foreign_keys", "check_enums"], "description": "operation=introspect only: the catalog question. The reply is a query reply whose rows carry the columns of the Postgres information_schema SELECT for that kind (postgres_external _helpers.build_*_sql), answered by the edge from the database's own catalog. Core sends it for a non-Postgres source (db_type mysql, mariadb or mssql)." },
+        "schema_name": { "type": "string", "description": "operation=introspect: the schema (on MySQL, the database) every kind but schemas asks about." },
+        "table_name": { "type": "string", "description": "The table a parametric operation targets; for operation=introspect, the table columns, primary_keys, foreign_keys and check_enums ask about." },
+        "sql": { "type": "string" },
+        "shell_command": { "type": "string" },
+        "url": { "type": "string", "description": "Target URL for HTTP routes" },
+        "http_method": { "type": "string", "enum": ["GET", "POST", "PUT", "DELETE"] },
+        "http_headers": { "type": "object" },
+        "http_body": { "type": "string" },
+        "mcp_server_url": { "type": "string", "description": "adr-158 — target MCP server endpoint (http[s]:// for streamable-HTTP/SSE transport). Presence of mcp_tool selects the MCP transport at the controller." },
+        "mcp_transport": { "type": "string", "enum": ["http", "sse", "stdio"], "default": "http", "description": "adr-158 — MCP transport binding. 'http' = streamable-HTTP JSON-RPC (default); 'sse' = HTTP+SSE; 'stdio' = local child process (mcp_command)." },
+        "mcp_command": { "type": "string", "description": "adr-158 — for mcp_transport=stdio: the local command line launching the MCP server as a child process." },
+        "mcp_tool": { "type": "string", "description": "adr-158 — the MCP tool name to invoke (tools/call). Its presence selects the MCP transport." },
+        "mcp_arguments": { "type": "object", "description": "adr-158 — arguments object passed to the MCP tool call." },
+        "mcp_token": { "type": "string", "description": "adr-158 — bearer-token convenience for the MCP server; becomes Authorization: Bearer <token> unless mcp_headers already supplies Authorization. Resolved from the credential store at dispatch. Stays local to the controller." },
+        "mcp_headers": { "type": "object", "description": "adr-158 — arbitrary custom request headers applied to every MCP request (e.g. Compass needs X-API-Key + X-Project). Values resolved from the credential store at dispatch; stay local to the controller." }
+      },
+      "additionalProperties": true,
+      "allOf": [
+        {
+          "if": { "properties": { "operation": { "const": "introspect" } }, "required": ["operation"] },
+          "then": {
+            "required": ["introspect"],
+            "not": { "required": ["sql"] },
+            "allOf": [
+              { "if": { "properties": { "introspect": { "not": { "const": "schemas" } } } }, "then": { "required": ["schema_name"] } },
+              { "if": { "properties": { "introspect": { "enum": ["columns", "primary_keys", "foreign_keys", "check_enums"] } } }, "then": { "required": ["table_name"] } }
+            ]
+          }
+        }
+      ]
+    },
+    "response_topic": { "type": "string", "description": "MQTT topic to publish result to" }
+  },
+  "additionalProperties": false
+}
