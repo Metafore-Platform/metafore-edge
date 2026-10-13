@@ -106,7 +106,7 @@ public final class FhirTemplateExecutor {
      *
      * @throws UnknownTemplateException   templateId not in ALLOWED_TEMPLATES
      * @throws UnknownParameterException  a search param key not in SEARCH_PARAM_WHITELIST
-     * @throws IllegalArgumentException   connection.base_url absent or blank
+     * @throws IllegalArgumentException   connection.base_url absent, blank, or fails validation
      */
     @SuppressWarnings("unchecked")
     public Map<String, Object> execute(
@@ -122,7 +122,7 @@ public final class FhirTemplateExecutor {
             throw new IllegalArgumentException(
                 "connection.base_url is required for run_template");
         }
-        String baseUrl = ((String) rawUrl).strip().replaceAll("/+$", "");
+        String baseUrl = validateAndNormalizeBaseUrl((String) rawUrl);
         Map<String, Object> safeParams = params != null ? params : Map.of();
         long start = System.currentTimeMillis();
         try {
@@ -133,16 +133,72 @@ public final class FhirTemplateExecutor {
             }
         } catch (UnknownParameterException e) {
             throw e;
-        } catch (Exception e) {
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return err(start, templateId, "fhir_transport_error", "FHIR call interrupted");
+        } catch (IOException e) {
             return err(start, templateId, "fhir_transport_error",
-                "FHIR call failed: " + e.getClass().getSimpleName()
-                + ": " + e.getMessage());
+                "FHIR call failed: IOException: " + e.getMessage());
         }
+    }
+
+    /**
+     * Validates and normalizes the FHIR server base URL.
+     *
+     * <p>Rules:
+     * <ul>
+     *   <li>scheme must be {@code https}; {@code http} is allowed only for localhost / 127.0.0.1</li>
+     *   <li>no userinfo (embedded credentials)</li>
+     *   <li>no query string or fragment</li>
+     * </ul>
+     *
+     * @throws IllegalArgumentException if any rule is violated
+     */
+    static String validateAndNormalizeBaseUrl(String raw) {
+        URI uri;
+        try {
+            uri = URI.create(raw.strip());
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(
+                "connection.base_url is not a valid URI: " + raw);
+        }
+        String scheme = uri.getScheme();
+        if (scheme == null) {
+            throw new IllegalArgumentException(
+                "connection.base_url must include a scheme (https://): " + raw);
+        }
+        if ("http".equalsIgnoreCase(scheme)) {
+            String host = uri.getHost();
+            if (!("localhost".equalsIgnoreCase(host) || "127.0.0.1".equals(host))) {
+                throw new IllegalArgumentException(
+                    "connection.base_url must use https (http is only allowed for "
+                    + "localhost / 127.0.0.1): " + raw);
+            }
+        } else if (!"https".equalsIgnoreCase(scheme)) {
+            throw new IllegalArgumentException(
+                "connection.base_url must use https scheme, got: " + scheme);
+        }
+        if (uri.getUserInfo() != null) {
+            throw new IllegalArgumentException(
+                "connection.base_url must not contain userinfo (credentials in URL)");
+        }
+        if (uri.getQuery() != null) {
+            throw new IllegalArgumentException(
+                "connection.base_url must not contain a query string: " + raw);
+        }
+        if (uri.getFragment() != null) {
+            throw new IllegalArgumentException(
+                "connection.base_url must not contain a fragment: " + raw);
+        }
+        String path = uri.getPath() != null ? uri.getPath().replaceAll("/+$", "") : "";
+        return scheme.toLowerCase() + "://" + uri.getHost()
+            + (uri.getPort() != -1 ? ":" + uri.getPort() : "")
+            + path;
     }
 
     private Map<String, Object> readPatient(
         long start, String baseUrl, Map<String, Object> params
-    ) throws Exception {
+    ) throws IOException, InterruptedException {
         Object idObj = params.get("patient_id");
         if (!(idObj instanceof String) || ((String) idObj).isBlank()) {
             return err(start, "fhir.patient.read", "missing_parameter",
@@ -156,7 +212,7 @@ public final class FhirTemplateExecutor {
 
     private Map<String, Object> searchPatients(
         long start, String baseUrl, Map<String, Object> params
-    ) throws Exception {
+    ) throws IOException, InterruptedException {
         StringBuilder query = new StringBuilder();
         for (Map.Entry<String, Object> entry : params.entrySet()) {
             String key = entry.getKey();
@@ -175,7 +231,7 @@ public final class FhirTemplateExecutor {
         return wrapResponse(start, resp, "fhir.patient.search");
     }
 
-    private HttpResponse<String> get(String url) throws Exception {
+    private HttpResponse<String> get(String url) throws IOException, InterruptedException {
         HttpRequest req = HttpRequest.newBuilder()
             .uri(URI.create(url))
             .timeout(REQUEST_TIMEOUT)
@@ -188,7 +244,7 @@ public final class FhirTemplateExecutor {
     @SuppressWarnings("unchecked")
     private Map<String, Object> wrapResponse(
         long start, HttpResponse<String> resp, String action
-    ) throws Exception {
+    ) throws IOException {
         long latency = System.currentTimeMillis() - start;
         if (resp.statusCode() < 200 || resp.statusCode() >= 300) {
             return err(start, action, "fhir_http_error",

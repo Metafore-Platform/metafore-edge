@@ -68,12 +68,9 @@
       <artifactId>camel-csv</artifactId>
       <version>${camel.version}</version>
     </dependency>
-    <!-- task 828b1be6 — FHIR template registry: HAPI FHIR R4 client (via camel-fhir transitive) -->
-    <dependency>
-      <groupId>org.apache.camel</groupId>
-      <artifactId>camel-fhir</artifactId>
-      <version>${camel.version}</version>
-    </dependency>
+    <!-- task 828b1be6 — FhirTemplateExecutor uses java.net.http directly,
+         not the Camel FHIR component; camel-fhir is therefore omitted to
+         avoid pulling in HAPI FHIR as an unnecessary CVE surface. -->
     <!-- CsvMapper for header-bearing partner files. Declared explicitly rather
          than leaned on transitively: camel-csv uses commons-csv, so relying on
          this arriving by accident is how a build breaks on a dependency bump. -->

@@ -81,6 +81,54 @@ class FhirTemplateExecutorTest {
         );
     }
 
+    // ── base_url validation (validateAndNormalizeBaseUrl) ─────────────
+
+    @Test
+    void httpPlaintextRemoteHostIsRefused() {
+        var ex = assertThrows(IllegalArgumentException.class,
+            () -> FhirTemplateExecutor.validateAndNormalizeBaseUrl("http://evil.example.com/fhir"));
+        assertTrue(ex.getMessage().contains("https"),
+            "error must mention https requirement: " + ex.getMessage());
+    }
+
+    @Test
+    void httpLocalhostIsAllowed() {
+        // http allowed only for localhost (test / local dev)
+        String result = FhirTemplateExecutor.validateAndNormalizeBaseUrl("http://localhost:8080/fhir");
+        assertEquals("http://localhost:8080/fhir", result);
+    }
+
+    @Test
+    void userinfoInUrlIsRefused() {
+        var ex = assertThrows(IllegalArgumentException.class,
+            () -> FhirTemplateExecutor.validateAndNormalizeBaseUrl("https://user:pass@host.example.com/fhir"));
+        assertTrue(ex.getMessage().toLowerCase().contains("userinfo"),
+            "error must mention userinfo: " + ex.getMessage());
+    }
+
+    @Test
+    void queryStringInUrlIsRefused() {
+        var ex = assertThrows(IllegalArgumentException.class,
+            () -> FhirTemplateExecutor.validateAndNormalizeBaseUrl("https://host.example.com/fhir?foo=bar"));
+        assertTrue(ex.getMessage().contains("query"),
+            "error must mention query string: " + ex.getMessage());
+    }
+
+    @Test
+    void fragmentInUrlIsRefused() {
+        var ex = assertThrows(IllegalArgumentException.class,
+            () -> FhirTemplateExecutor.validateAndNormalizeBaseUrl("https://host.example.com/fhir#section"));
+        assertTrue(ex.getMessage().contains("fragment"),
+            "error must mention fragment: " + ex.getMessage());
+    }
+
+    @Test
+    void trailingSlashIsNormalized() {
+        String result = FhirTemplateExecutor.validateAndNormalizeBaseUrl("https://hapi.fhir.org/baseR4/");
+        assertFalse(result.endsWith("/"), "trailing slash must be stripped: " + result);
+        assertEquals("https://hapi.fhir.org/baseR4", result);
+    }
+
     // ── search parameter whitelist ────────────────────────────────────
 
     @Test
