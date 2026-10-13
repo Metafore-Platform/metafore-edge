@@ -16,6 +16,9 @@ public final class DialectGate {
     /** The operations whose statements are built in the source's dialect (PR 2); every other one is Postgres-only for now. */
     private static final Set<String> DIALECT_OPERATIONS = Set.of("create", "update", "delete", "select");
 
+    /** The types those operations are proven against a live server for (CI job {@code dialects}); SQL Server and Oracle wait for theirs. */
+    private static final Set<DbType> LIVE = Set.of(DbType.POSTGRESQL, DbType.MYSQL, DbType.MARIADB);
+
     private DialectGate() { }
 
     /** The refusal message when {@code params} name a non-Postgres source for {@code operation}, otherwise null. */
@@ -30,7 +33,7 @@ public final class DialectGate {
         } catch (DbType.UnsupportedDbTypeException e) {
             return e.getMessage();
         }
-        return type == DbType.POSTGRESQL || DIALECT_OPERATIONS.contains(operation) ? null
+        return type == DbType.POSTGRESQL || LIVE.contains(type) && DIALECT_OPERATIONS.contains(operation) ? null
             : "dialect not yet supported for " + (operation == null ? "this operation" : operation)
                 + " (db_type " + type.wireName() + ")";
     }
