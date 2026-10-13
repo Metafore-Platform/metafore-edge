@@ -122,71 +122,15 @@ class MessageFactoryTest {
         assertFalse(msg.containsKey("runtime_hints"));
     }
 
-    // ── Phase 14.18 — tenants array on registration payload ──────────
-
     @Test
-    void registrationWithTenantsArgDoesNotEmitField() throws Exception {
-        // ADR-023: one tenant per edge in v2; tenants param accepted for
-        // call-site compat but must not appear in the payload.
+    void registrationNeverEmitsTenants() throws Exception {
+        // ADR-023: one tenant per edge in v2; tenants field must not appear.
         Map<String, Object> msg = MessageFactory.registration(
             config, List.of("jdbc"), "postgresql", "localhost", 5432,
-            "native", Map.of("os_name", "Linux"),
-            List.of("metafore-corp", "metafore-walkthrough"));
-        assertFalse(msg.containsKey("tenants"),
-            "ADR-023: tenants must not be emitted in registration payload");
-        validate(msg, "registration.schema.json");
-    }
-
-    @Test
-    void registrationWithSingleTenantArgDoesNotEmitField() throws Exception {
-        Map<String, Object> msg = MessageFactory.registration(
-            config, List.of("jdbc"), "postgresql", "localhost", 5432,
-            "native", null, List.of("metafore-corp"));
-        assertFalse(msg.containsKey("tenants"),
-            "ADR-023: tenants must not be emitted in registration payload");
-        validate(msg, "registration.schema.json");
-    }
-
-    @Test
-    void registrationLegacy7ArgOverloadOmitsTenants() {
-        // Back-compat invariant: the 7-arg overload (pre-Phase 14.18)
-        // must produce a payload without the `tenants` field. Older
-        // edges that never call the 8-arg form continue to ship
-        // payloads that older cores validate as single-tenant.
-        Map<String, Object> msg = MessageFactory.registration(
-            config, List.of("jdbc"), null, null, null,
             "native", Map.of("os_name", "Linux"));
-        assertFalse(msg.containsKey("tenants"));
-    }
-
-    @Test
-    void registrationWithNullTenantsOmitsField() throws Exception {
-        Map<String, Object> msg = MessageFactory.registration(
-            config, List.of("jdbc"), null, null, null,
-            "native", null, null);
-        assertFalse(msg.containsKey("tenants"));
-        validate(msg, "registration.schema.json");
-    }
-
-    @Test
-    void registrationWithEmptyTenantsOmitsField() throws Exception {
-        Map<String, Object> msg = MessageFactory.registration(
-            config, List.of("jdbc"), null, null, null,
-            "native", null, List.of());
-        assertFalse(msg.containsKey("tenants"));
-        validate(msg, "registration.schema.json");
-    }
-
-    @Test
-    void registrationTenantsArgIsNeverEmitted() {
-        // ADR-023: tenants param is accepted for call-site compat but must
-        // never appear in the payload regardless of what is passed.
-        List<String> source = List.of("a", "b");
-        Map<String, Object> msg = MessageFactory.registration(
-            config, List.of("jdbc"), null, null, null,
-            null, null, source);
         assertFalse(msg.containsKey("tenants"),
-            "ADR-023: tenants must not be emitted even when a non-empty list is passed");
+            "ADR-023: tenants must never be emitted in registration payload");
+        validate(msg, "registration.schema.json");
     }
 
     @Test

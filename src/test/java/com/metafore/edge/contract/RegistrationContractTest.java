@@ -125,7 +125,7 @@ class RegistrationContractTest {
 
         List<String> capabilities = Capabilities.declaredList();
         Map<String, Object> payload = MessageFactory.registration(
-            config, capabilities, "none", null, null, null, null, null);
+            config, capabilities, "none", null, null, null, null);
 
         List<Map<String, Object>> templates = FhirTemplateExecutor.ALLOWED_TEMPLATES
             .stream().sorted()

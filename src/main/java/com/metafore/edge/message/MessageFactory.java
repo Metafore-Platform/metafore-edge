@@ -29,45 +29,23 @@ public final class MessageFactory {
 
     /**
      * Backward-compat 5-arg overload. Calls the 8-arg variant with
-     * {@code runtime=null}, {@code runtimeHints=null}, {@code tenants=null}
-     * — emitting a payload that older Phase-13 schemas validated
-     * (no runtime field, no tenants array). Production callers should
-     * use the 8-arg form; this overload exists so test fixtures + any
-     * legacy call sites continue to compile without churn.
+     * {@code runtime=null}, {@code runtimeHints=null} — emitting a
+     * payload that older Phase-13 schemas validated (no runtime field).
      */
     public static Map<String, Object> registration(EdgeConfig config,
             List<String> capabilities, String dbType, String dbHost, Integer dbPort) {
         return registration(config, capabilities, dbType, dbHost, dbPort,
-            null, null, null);
+            null, null);
     }
 
     /**
-     * Phase 14.9 / ETA.T2 backward-compat 7-arg overload (no tenants).
-     * Calls the 8-arg variant with {@code tenants=null} — emits the
-     * pre-14.18 payload shape (singleton {@code tenant_id} only, no
-     * {@code tenants} array). Kept so existing call sites that only
-     * care about runtime advertisement compile without change.
+     * Registration payload composer.
+     *
+     * ADR-023: one tenant per edge in v2; {@code tenants} is never emitted.
      */
     public static Map<String, Object> registration(EdgeConfig config,
             List<String> capabilities, String dbType, String dbHost, Integer dbPort,
             String runtime, Map<String, Object> runtimeHints) {
-        return registration(config, capabilities, dbType, dbHost, dbPort,
-            runtime, runtimeHints, null);
-    }
-
-    /**
-     * Registration payload composer (8-arg overload — {@code tenants} param
-     * is kept for call-site compatibility but silently ignored).
-     *
-     * ADR-023: one tenant per edge in v2; TENANT_IDS / multi-tenant
-     * registration payloads are forbidden. The {@code tenants} field is
-     * not in the pinned {@code registration.schema.json}
-     * (additionalProperties:false) and must never be emitted.
-     */
-    public static Map<String, Object> registration(EdgeConfig config,
-            List<String> capabilities, String dbType, String dbHost, Integer dbPort,
-            String runtime, Map<String, Object> runtimeHints,
-            List<String> tenants) {
         Map<String, Object> msg = new LinkedHashMap<>();
         msg.put("controller_id", config.controllerId());
         msg.put("tenant_id", config.tenantId());

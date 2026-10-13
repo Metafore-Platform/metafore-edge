@@ -91,8 +91,7 @@ public class RegistrationRoute extends RouteBuilder {
 
                 Map<String, Object> payload = MessageFactory.registration(
                     config, capabilities, dbType, dbHost, dbPort,
-                    config.runtime(), config.runtimeHints(),
-                    config.tenants());
+                    config.runtime(), config.runtimeHints());
                 payload.put("templates", templates);
                 exchange.getIn().setBody(payload);
             })
