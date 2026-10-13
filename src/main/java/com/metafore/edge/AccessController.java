@@ -1,6 +1,7 @@
 package com.metafore.edge;
 
 import com.metafore.edge.config.EdgeConfig;
+import com.metafore.edge.mqtt.MqttSecurity;
 import com.metafore.edge.route.*;
 import com.metafore.edge.service.DataSourceRegistry;
 import com.metafore.edge.topic.TopicBuilder;
@@ -40,7 +41,13 @@ public class AccessController {
                 + "serving from one process.");
         }
 
+        // v2: the edge never connects to the broker anonymously. Either its certificate (read again at every connect) or
+        // a username and password; anything else stops it here, before any route exists. See mqtt/MqttSecurity.
+        MqttSecurity mqtt = MqttSecurity.fromEnv(
+            System.getenv(), config.brokerUrl(), config.tenantId(), config.controllerId());
+
         CamelContext context = new DefaultCamelContext();
+        context.addComponent("paho", mqtt.component());
         DataSourceRegistry dsRegistry = new DataSourceRegistry(context);
 
         // Register default DataSource if DB is available
