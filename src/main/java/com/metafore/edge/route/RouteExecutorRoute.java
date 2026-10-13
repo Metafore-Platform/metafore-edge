@@ -8,6 +8,7 @@ import com.metafore.edge.service.DataSourceRegistry;
 import com.metafore.edge.service.McpExecutor;
 import com.metafore.edge.service.ShellExecutor;
 import com.metafore.edge.service.SqlExecutor;
+import com.metafore.edge.topic.ReplyTopic;
 import com.metafore.edge.topic.TopicBuilder;
 import org.apache.camel.builder.RouteBuilder;
 
@@ -56,6 +57,8 @@ public class RouteExecutorRoute extends RouteBuilder {
                 Map<String, Object> cmd = exchange.getIn().getBody(Map.class);
                 String action = (String) cmd.getOrDefault("action", "");
                 String routeId = (String) cmd.getOrDefault("route_id", "");
+                // v2: the command's own reply topic, only when it is this edge's per-edge topic (topic/ReplyTopic)
+                exchange.setProperty("mfReplyTopic", ReplyTopic.forEdge(cmd.get("response_topic"), topics));
 
                 Map<String, Object> result = enforceCapability(action, routeId, cmd);
                 if (result != null) {
@@ -84,8 +87,15 @@ public class RouteExecutorRoute extends RouteBuilder {
                 exchange.getIn().setBody(result);
             })
             .marshal().json()
+            // one String the telemetry publish and the reply publish both send in full (a stream is read once)
+            .convertBodyTo(String.class)
             .to("paho:" + topics.telemetryRouteResults()
-                + "?brokerUrl=" + config.brokerUrl())
+                + "?brokerUrl=" + config.brokerUrl()).id("route-result-publish")
+            .choice()
+                .when(exchangeProperty("mfReplyTopic").isNotNull())
+                    .toD("paho:${exchangeProperty.mfReplyTopic}"
+                        + "?brokerUrl=" + config.brokerUrl()).id("route-reply-publish")
+            .end()
             .log("Route result published");
     }
 

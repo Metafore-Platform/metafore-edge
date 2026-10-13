@@ -40,6 +40,13 @@ public final class TopicBuilder {
     public String controlDiscovery() { return control("discovery"); }
     public String controlWriteBack() { return control("write-back"); }
 
+    /**
+     * Where this edge answers one command: {@code response/<tenant>/<controller>/<id>}. The broker lets an edge publish
+     * only under {@code response/<its username>/}, and the platform takes a reply only from the edge the command went to.
+     * See {@link ReplyTopic}.
+     */
+    public String responsePrefix() { return "response/" + tenantId + "/" + controllerId + "/"; }
+
     private String telemetry(String suffix) {
         return "telemetry/" + tenantId + "/" + controllerId + "/" + suffix;
     }

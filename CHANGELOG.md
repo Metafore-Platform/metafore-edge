@@ -1,5 +1,10 @@
 # metafore-edge changelog
 
+## Unreleased (development, v2) — per-edge reply topic
+
+- **Add `topic/ReplyTopic`** (Compass 9a26adcd, adr-059). A command's `response_topic` is answered on only when it is this edge's own per-edge topic, `response/<tenant>/<controller>/<id>` (three levels, no empty level, no `+` or `#`, this edge's tenant and controller). The retired shared `response/<id>`, another edge's topic and anything malformed are not answered on (logged at WARN); the result still goes to its telemetry topic. The broker would refuse such a publish anyway (an edge may publish only under `response/<its username>/`).
+- **`RouteExecutorRoute`, `RestAdapterRoute` (write-back) and `DiscoveryRoute`** publish the result to the command's valid reply topic as well as to `telemetry/.../route-results` (`.../discovery`). The discovery route used to echo to any topic the command named. The result is converted to one String before the two publishes so both carry it in full.
+
 ## Unreleased (development, v2) — MQTT sign-in: the edge never connects anonymously
 
 - **Add `mqtt/MqttSecurity` and `mqtt/ReloadingSslSocketFactory`** (Compass 9a26adcd, adr-059). The edge signs in to the broker with its client certificate (`METAFORE_MQTT_TLS_ENABLED`, `_CA_CERT`, `_CERT`, `_KEY`: PEM files, normally mounted at `/etc/metafore/mqtt`) and sends **no username and no password**: the broker maps the certificate's common name, which must be `<TENANT_ID>/<CONTROLLER_ID>`, to the username its topic rules key on. The pair is read again at every connect, so a certificate the platform renews on disk is used without a restart; a pair caught mid-rotation keeps the last one that loaded. PKCS#8, SEC1 and PKCS#1 keys load (bcpkix).
