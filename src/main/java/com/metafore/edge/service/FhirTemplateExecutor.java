@@ -21,10 +21,11 @@ import java.util.Set;
  * task 828b1be6 — FHIR template registry.
  *
  * <p>Executes registered FHIR read/search templates at the edge.
- * Two templates are supported:
+ * Three templates are supported:
  * <ul>
  *   <li>{@code fhir.patient.read} — GET {base_url}/Patient/{patient_id}</li>
  *   <li>{@code fhir.patient.search} — GET {base_url}/Patient?{whitelisted params}</li>
+ *   <li>{@code fhir.server.metadata} — GET {base_url}/metadata (CapabilityStatement)</li>
  * </ul>
  *
  * <p>Security invariants:
@@ -54,7 +55,8 @@ public final class FhirTemplateExecutor {
     /** Registered template ids this executor handles. */
     public static final Set<String> ALLOWED_TEMPLATES = Set.of(
         "fhir.patient.read",
-        "fhir.patient.search"
+        "fhir.patient.search",
+        "fhir.server.metadata"
     );
 
     /**
@@ -128,6 +130,8 @@ public final class FhirTemplateExecutor {
         try {
             if ("fhir.patient.read".equals(templateId)) {
                 return readPatient(start, baseUrl, safeParams);
+            } else if ("fhir.server.metadata".equals(templateId)) {
+                return readMetadata(start, baseUrl);
             } else {
                 return searchPatients(start, baseUrl, safeParams);
             }
@@ -208,6 +212,13 @@ public final class FhirTemplateExecutor {
             (String) idObj, StandardCharsets.UTF_8);
         HttpResponse<String> resp = get(baseUrl + "/Patient/" + patientId);
         return wrapResponse(start, resp, "fhir.patient.read");
+    }
+
+    private Map<String, Object> readMetadata(
+        long start, String baseUrl
+    ) throws IOException, InterruptedException {
+        HttpResponse<String> resp = get(baseUrl + "/metadata");
+        return wrapResponse(start, resp, "fhir.server.metadata");
     }
 
     private Map<String, Object> searchPatients(

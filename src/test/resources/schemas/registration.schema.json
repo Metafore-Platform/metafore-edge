@@ -35,6 +35,19 @@
       "type": "object",
       "additionalProperties": true,
       "description": "Phase 14.9 — Free-form diagnostic context backing the runtime classification."
+    },
+    "templates": {
+      "type": "array",
+      "description": "task 828b1be6 — FHIR template registry: templates this edge can execute via run_template.",
+      "items": {
+        "type": "object",
+        "required": ["id", "version"],
+        "properties": {
+          "id":      { "type": "string", "minLength": 1 },
+          "version": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      }
     }
   },
   "additionalProperties": false

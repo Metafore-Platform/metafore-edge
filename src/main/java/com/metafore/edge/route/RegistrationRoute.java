@@ -4,10 +4,14 @@ import com.metafore.edge.config.EdgeConfig;
 import com.metafore.edge.message.MessageFactory;
 import com.metafore.edge.service.Capabilities;
 import com.metafore.edge.service.DataSourceRegistry;
+import com.metafore.edge.service.FhirTemplateExecutor;
 import com.metafore.edge.topic.TopicBuilder;
 import org.apache.camel.builder.RouteBuilder;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Phase 14.18 — Multi-tenant registration publisher.
@@ -73,10 +77,24 @@ public class RegistrationRoute extends RouteBuilder {
                 //   edge serves; this route fires once per tenant but
                 //   each payload carries the full set so core can write
                 //   N HAS_CONTROLLER edges on a single registration).
-                exchange.getIn().setBody(MessageFactory.registration(
+                // task 828b1be6 — advertise FHIR templates in registration payload
+                List<Map<String, Object>> templates = FhirTemplateExecutor.ALLOWED_TEMPLATES
+                    .stream()
+                    .sorted()
+                    .map(id -> {
+                        Map<String, Object> t = new LinkedHashMap<>();
+                        t.put("id", id);
+                        t.put("version", "1");
+                        return t;
+                    })
+                    .collect(Collectors.toList());
+
+                Map<String, Object> payload = MessageFactory.registration(
                     config, capabilities, dbType, dbHost, dbPort,
                     config.runtime(), config.runtimeHints(),
-                    config.tenants()));
+                    config.tenants());
+                payload.put("templates", templates);
+                exchange.getIn().setBody(payload);
             })
             .marshal().json()
             .to("paho:" + topics.telemetryRegistration()
