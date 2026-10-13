@@ -27,6 +27,8 @@ public final class DataSources {
     private static final int SOCKET_TIMEOUT_MS = 45_000;
     private static final int QUERY_TIMEOUT_SECONDS = 30;
 
+    private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(DataSources.class);
+
     private DataSources() { }
 
     /** A non-Postgres data source. (Postgres keeps its own construction in {@code DataSourceRegistry}.) */
@@ -56,9 +58,23 @@ public final class DataSources {
     private static DataSource mariadb(DbType type, String host, int port, String dbName, String user, String password) throws SQLException {
         MariaDbDataSource ds = new MariaDbDataSource();
         ds.setUrl(mariadbUrl(type, host, port, dbName));
+        String warning = unverifiedWarning(type, host, port, dbName);
+        if (warning != null) {
+            LOG.warn(warning);
+        }
         ds.setUser(user);
         ds.setPassword(password);
         return ds;
+    }
+
+    /**
+     * The WARNING logged when a data source is created that encrypts but does not verify the server (MySQL, sslMode=trust),
+     * or null. Names the source; carries no credential.
+     */
+    public static String unverifiedWarning(DbType type, String host, int port, String dbName) {
+        return type != DbType.MYSQL ? null
+            : "[db] MySQL data source " + host + ":" + port + "/" + dbName + " connects with sslMode=trust: TLS encrypted, "
+                + "server certificate not verified (a man-in-the-middle is possible). Track the verify-ca / verify-full follow-up task.";
     }
 
     /** The Connector/J URL (with options, no credentials) a MySQL or MariaDB source connects with. */

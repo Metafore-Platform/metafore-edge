@@ -38,6 +38,16 @@ class DataSourcesTest {
     }
 
     @Test
+    void theUnverifiedWarningNamesTheSourceForMysqlOnly() {
+        String w = DataSources.unverifiedWarning(DbType.MYSQL, "db.example", 3306, "shop");
+        assertTrue(w.contains("db.example:3306/shop") && w.contains("server certificate not verified"), w);
+        assertFalse(w.contains("secret") || w.contains("password"));
+        for (DbType t : new DbType[] {DbType.MARIADB, DbType.MSSQL, DbType.ORACLE, DbType.POSTGRESQL}) {
+            org.junit.jupiter.api.Assertions.assertNull(DataSources.unverifiedWarning(t, "h", 1, "d"), t.name());
+        }
+    }
+
+    @Test
     void registryKeysCarryTheTypeExceptForPostgres() {
         String legacy = DataSourceRegistry.connectionKey("h", "5432", "d", "u");
         assertEquals(legacy, DataSourceRegistry.connectionKey(DbType.POSTGRESQL, "h", "5432", "d", "u"));
