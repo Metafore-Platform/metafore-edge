@@ -1,5 +1,9 @@
 # metafore-edge changelog
 
+## Unreleased (development, v2) — an mTLS integration test against the platform's own broker
+
+- **Add `scripts/mtls-broker.sh`, `tests/mtls/` and `MqttMtlsIT`** (Compass 9a26adcd). CI job `mtls` of `development.yml` starts EMQX 5.8 with the platform chart's own `emqx.conf` and `acl.conf` (pinned byte for byte from metafore-api by `scripts/sync-broker-config.sh`; `BrokerConfigPinTest` fails offline on a hand edit) plus the chart's certificate listener (`tests/mtls/mtls.overlay.conf`), makes throw-away certificates with openssl, and runs the edge's real `MqttSecurity` against it: the broker names the client by its certificate's common name on `ssl:default`; the topic rules confine it; a stranger's certificate, no certificate and an untrusted broker are refused; the same factory presents whatever is on disk at the next connect. Runs on `development` only; `mvn verify` locally skips it unless `MTLS_DIR` is set.
+
 ## Unreleased (development, v2) — MQTT sign-in: the edge never connects anonymously
 
 - **Add `mqtt/MqttSecurity` and `mqtt/ReloadingSslSocketFactory`** (Compass 9a26adcd, adr-059). The edge signs in to the broker with its client certificate (`METAFORE_MQTT_TLS_ENABLED`, `_CA_CERT`, `_CERT`, `_KEY`: PEM files, normally mounted at `/etc/metafore/mqtt`) and sends **no username and no password**: the broker maps the certificate's common name, which must be `<TENANT_ID>/<CONTROLLER_ID>`, to the username its topic rules key on. The pair is read again at every connect, so a certificate the platform renews on disk is used without a restart; a pair caught mid-rotation keeps the last one that loaded. PKCS#8, SEC1 and PKCS#1 keys load (bcpkix).

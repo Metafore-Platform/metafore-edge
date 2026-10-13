@@ -43,3 +43,32 @@ jobs:
           cache: maven
       - name: Build and run the unit and contract tests
         run: mvn package -B
+
+  # The real broker: the platform chart's own EMQX configuration, certificate listener and topic rules, with throw-away
+  # certificates; the edge signs in to it with its certificate (scripts/mtls-broker.sh, MqttMtlsIT).
+  mtls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+      - name: Start the broker and make the certificates
+        run: scripts/mtls-broker.sh start
+      - name: The mTLS integration test
+        run: mvn -B verify -Dtest=NONE -Dsurefire.failIfNoSpecifiedTests=false -Dit.test=MqttMtlsIT
+      - name: It must have run, not been skipped
+        run: |
+          cat target/failsafe-reports/*MqttMtlsIT.txt
+          grep -q "Tests run: [1-9]" target/failsafe-reports/*MqttMtlsIT.txt
+          grep -q "Skipped: 0" target/failsafe-reports/*MqttMtlsIT.txt
+      - name: The broker's log
+        if: failure()
+        run: docker logs --tail 200 metafore-mtls-emqx
+      - name: Stop the broker
+        if: always()
+        run: scripts/mtls-broker.sh stop

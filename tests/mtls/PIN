@@ -1,0 +1,5 @@
+# Pinned broker configuration of the platform chart. Change it only with scripts/sync-broker-config.sh.
+source_repo=Metafore-Platform/metafore-api
+source_commit=df2e44d97fd69cf89c175e3c3186e22d9977fecc
+emqx.conf=8a1aec0dd06cbcfaaa3b9dbf679e38fd158da275ed34bd4c3e631d3a251c9fdd
+acl.conf=c7595dbe12c1fa959c6f97ea1d794b8a8a338921ad6ea029e9515d1b6497efa4
