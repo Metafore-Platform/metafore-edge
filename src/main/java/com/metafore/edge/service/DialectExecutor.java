@@ -24,6 +24,8 @@ import java.util.Set;
  */
 public final class DialectExecutor {
 
+    private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(DialectExecutor.class);
+
     private DialectExecutor() { }
 
     /** SQL run on every connection before a command, so a session behaves as the Postgres pools do (UTC, bounded waits). */
@@ -64,6 +66,11 @@ public final class DialectExecutor {
         }
 
         try (Connection conn = ds.getConnection()) {
+            if (type == DbType.MYSQL) {
+                // sslMode=trust (DataSources): encrypted, but the server's certificate is not checked
+                LOG.warn("MySQL connection to {} is encrypted but the server is not verified (no CA configured)",
+                    conn.getMetaData().getURL().replaceFirst("\\?.*$", ""));
+            }
             try (Statement st = conn.createStatement()) {
                 for (String s : sessionSql(type)) {
                     st.execute(s);
