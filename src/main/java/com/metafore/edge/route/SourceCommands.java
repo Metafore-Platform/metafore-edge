@@ -7,6 +7,8 @@ import com.metafore.edge.db.DialectGate;
 import com.metafore.edge.message.MessageFactory;
 import com.metafore.edge.service.ConnectionTester;
 import com.metafore.edge.service.DataSourceRegistry;
+import com.metafore.edge.service.DialectExecutor;
+import com.metafore.edge.service.SqlExecutor;
 
 import java.util.Collections;
 import java.util.Map;
@@ -112,6 +114,16 @@ final class SourceCommands {
         return MessageFactory.routeResult(config, routeId,
             "error", "connect_and_ping", probe.latencyMs(),
             null, null, null, probe.reason(), probe.message());
+    }
+
+    /** The parametric write/select in the source's own dialect (Postgres keeps {@link SqlExecutor}'s path). */
+    static Map<String, Object> executeParametric(Map<String, Object> params, javax.sql.DataSource ds, String operation,
+                                                 String tableName, java.util.List<String> columns, java.util.List<Object> values,
+                                                 String whereColumn, Object whereValue) {
+        DbType type = DbType.of(str(params, "db_type", "DB_TYPE", ""));
+        return type == DbType.POSTGRESQL
+            ? SqlExecutor.executeParametric(ds, operation, tableName, columns, values, whereColumn, whereValue)
+            : DialectExecutor.executeParametric(type, ds, operation, tableName, columns, values, whereColumn, whereValue);
     }
 
     private static String str(Map<String, Object> params, String key1, String key2, String def) {

@@ -302,10 +302,8 @@ public class RouteExecutorRoute extends RouteBuilder {
         }
         List<Object> values = new ArrayList<>((List<Object>) valsObj);
 
-        Map<String, Object> execResult = SqlExecutor.executeParametric(
-            ds, operation, tableName, columns, values,
-            whereColumn, whereValue
-        );
+        Map<String, Object> execResult = SourceCommands.executeParametric(
+            params, ds, operation, tableName, columns, values, whereColumn, whereValue);
         String status = (String) execResult.get("status");
         String action = (String) execResult.getOrDefault("action", "execute");
         long latency = ((Number) execResult.get("latency_ms")).longValue();

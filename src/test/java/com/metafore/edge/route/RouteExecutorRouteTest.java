@@ -368,6 +368,23 @@ class RouteExecutorRouteTest {
     }
 
     @Test
+    void parametricOperationsPassTheGateOnlyForTypesProvenLive() {
+        for (String type : new String[] {"mysql", "mariadb"}) {
+            for (String op : new String[] {"create", "update", "delete", "select"}) {
+                assertNull(com.metafore.edge.db.DialectGate.refusal(Map.of("db_type", type), op), type + " " + op);
+            }
+            for (String op : new String[] {"read", "write_with_events", "introspect"}) {
+                assertNotNull(com.metafore.edge.db.DialectGate.refusal(Map.of("db_type", type), op), type + " " + op);
+            }
+        }
+        for (String type : new String[] {"mssql", "oracle"}) {
+            for (String op : new String[] {"create", "update", "delete", "select", "read"}) {
+                assertNotNull(com.metafore.edge.db.DialectGate.refusal(Map.of("db_type", type), op), type + " " + op);
+            }
+        }
+    }
+
+    @Test
     void postgresAndUnsetTypePassTheGate() {
         assertNull(com.metafore.edge.db.DialectGate.refusal(Map.of("operation", "read"), "read"));
         assertNull(com.metafore.edge.db.DialectGate.refusal(Map.of("db_type", "postgresql"), "read"));

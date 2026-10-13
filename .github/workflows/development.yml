@@ -67,6 +67,52 @@ jobs:
           grep -q "Tests run: [1-9]" target/failsafe-reports/*FhirPatientReadIT.txt
           grep -q "Skipped: 0" target/failsafe-reports/*FhirPatientReadIT.txt
 
+  # The parametric operations against a real MySQL and a real MariaDB (DialectParametricIT). SQL Server and Oracle follow
+  # with their own jobs.
+  dialects:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: mysql, db_type: mysql, image: 'mysql:8.4' }
+          - { name: mariadb, db_type: mariadb, image: 'mariadb:11.4' }
+    services:
+      db:
+        image: ${{ matrix.image }}
+        env:
+          MYSQL_ROOT_PASSWORD: it-root
+          MYSQL_DATABASE: it
+        ports:
+          - 3306:3306
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+      - name: Wait for the server
+        run: |
+          for i in $(seq 1 60); do (echo > /dev/tcp/127.0.0.1/3306) 2>/dev/null && exit 0; sleep 2; done
+          echo "no server on 3306"; exit 1
+      - name: The dialect integration test
+        env:
+          IT_DB_TYPE: ${{ matrix.db_type }}
+          IT_DB_HOST: 127.0.0.1
+          IT_DB_PORT: '3306'
+          IT_DB_NAME: it
+          IT_DB_USER: root
+          IT_DB_PASS: it-root
+        run: mvn -B verify -Dtest=NONE -Dsurefire.failIfNoSpecifiedTests=false -Dit.test=DialectParametricIT
+      - name: It must have run, not been skipped
+        run: |
+          cat target/failsafe-reports/*DialectParametricIT.txt
+          grep -q "Tests run: [1-9]" target/failsafe-reports/*DialectParametricIT.txt
+          grep -q "Skipped: 0" target/failsafe-reports/*DialectParametricIT.txt
+
   # The real broker: the platform chart's own EMQX configuration, certificate listener and topic rules, with throw-away
   # certificates; the edge signs in to it with its certificate (scripts/mtls-broker.sh, MqttMtlsIT).
   mtls:
