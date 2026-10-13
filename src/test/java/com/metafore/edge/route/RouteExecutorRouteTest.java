@@ -368,6 +368,16 @@ class RouteExecutorRouteTest {
     }
 
     @Test
+    void parametricOperationsPassTheGateForEveryType() {
+        for (String op : new String[] {"create", "update", "delete", "select"}) {
+            assertNull(com.metafore.edge.db.DialectGate.refusal(Map.of("db_type", "oracle"), op), op);
+        }
+        for (String op : new String[] {"read", "write_with_events", "introspect"}) {
+            assertNotNull(com.metafore.edge.db.DialectGate.refusal(Map.of("db_type", "mssql"), op), op);
+        }
+    }
+
+    @Test
     void postgresAndUnsetTypePassTheGate() {
         assertNull(com.metafore.edge.db.DialectGate.refusal(Map.of("operation", "read"), "read"));
         assertNull(com.metafore.edge.db.DialectGate.refusal(Map.of("db_type", "postgresql"), "read"));

@@ -43,7 +43,7 @@ public final class SqlExecutor {
         "uuid"
     );
 
-    private static final int MAX_ROWS = 100;
+    static final int MAX_ROWS = 100;
 
     // Absolute page-size ceiling for keyset (``list``) reads. This is
     // DECOUPLED from MAX_ROWS: MAX_ROWS is the legacy per-fetch memory

@@ -1,6 +1,7 @@
 package com.metafore.edge.db;
 
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Interim guard (part 2, between PR 1 and PR 2): operations still write Postgres SQL, so a source of any other
@@ -11,6 +12,9 @@ public final class DialectGate {
 
     /** The {@code error_details} tag of a refusal. */
     public static final String REFUSAL = "dialect_not_supported";
+
+    /** The operations whose statements are built in the source's dialect (PR 2); every other one is Postgres-only for now. */
+    private static final Set<String> DIALECT_OPERATIONS = Set.of("create", "update", "delete", "select");
 
     private DialectGate() { }
 
@@ -26,7 +30,7 @@ public final class DialectGate {
         } catch (DbType.UnsupportedDbTypeException e) {
             return e.getMessage();
         }
-        return type == DbType.POSTGRESQL ? null
+        return type == DbType.POSTGRESQL || DIALECT_OPERATIONS.contains(operation) ? null
             : "dialect not yet supported for " + (operation == null ? "this operation" : operation)
                 + " (db_type " + type.wireName() + ")";
     }
