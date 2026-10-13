@@ -21,7 +21,6 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
 
 /**
  * task 828b1be6 — registration.schema.json pinned from metafore-api contracts.
@@ -74,12 +73,7 @@ class RegistrationContractTest {
     void theRegistrationSchemaIsTheBytesTheMetaforeApiCommitPins() throws Exception {
         Map<String, String> pin = pin();
         String pinned = pin.get(REGISTRATION);
-        // The PIN entry is absent until scripts/sync-contracts.sh is run after
-        // metafore-api #910 (which adds templates to registration.schema.json) merges.
-        // The check is intentionally skipped until then; RouteCommandContractTest
-        // already guards source_repo and source_commit.
-        org.junit.jupiter.api.Assumptions.assumeTrue(pinned != null,
-            "registration.schema.json not yet pinned — run scripts/sync-contracts.sh <#910 sha>");
+        assertNotNull(pinned, "registration.schema.json missing from PIN — run scripts/sync-contracts.sh <sha>");
         assertEquals(pinned, sha256(resource(REGISTRATION)),
             REGISTRATION + " differs from the pinned bytes: re-pin with scripts/sync-contracts.sh <sha>");
     }
@@ -109,10 +103,10 @@ class RegistrationContractTest {
         // missing controller_id
         "{\"tenant_id\":\"t-1\",\"timestamp\":\"2026-10-13T12:00:00Z\","
             + "\"version\":\"1.0.0\",\"capabilities\":[]}",
-        // template item missing version
+        // template id fails the pattern (uppercase R — must be all-lowercase)
         "{\"controller_id\":\"c-1\",\"tenant_id\":\"t-1\",\"timestamp\":\"2026-10-13T12:00:00Z\","
             + "\"version\":\"1.0.0\",\"capabilities\":[],"
-            + "\"templates\":[{\"id\":\"fhir.patient.read\"}]}",
+            + "\"templates\":[{\"id\":\"fhir.patient.Read\",\"version\":\"1\"}]}",
         // template item extra field
         "{\"controller_id\":\"c-1\",\"tenant_id\":\"t-1\",\"timestamp\":\"2026-10-13T12:00:00Z\","
             + "\"version\":\"1.0.0\",\"capabilities\":[],"
@@ -127,18 +121,7 @@ class RegistrationContractTest {
 
     @Test
     void registrationRoutePayloadValidatesAgainstPinnedSchema() throws Exception {
-        org.junit.jupiter.api.Assumptions.assumeTrue(pin().containsKey(REGISTRATION),
-            "registration.schema.json not yet pinned — run scripts/sync-contracts.sh <#910 sha>");
-        EdgeConfig config = mock(EdgeConfig.class);
-        when(config.controllerId()).thenReturn("edge-test");
-        when(config.tenantId()).thenReturn("tenant-test");
-        when(config.edgeVersion()).thenReturn("1.0.0-test");
-        when(config.dbHost()).thenReturn(null);
-        when(config.dbPort()).thenReturn("5432");
-        when(config.dbName()).thenReturn(null);
-        when(config.runtime()).thenReturn(null);
-        when(config.runtimeHints()).thenReturn(null);
-        when(config.tenants()).thenReturn(null);
+        EdgeConfig config = EdgeConfig.from(java.util.Collections.emptyMap());
 
         List<String> capabilities = Capabilities.declaredList();
         Map<String, Object> payload = MessageFactory.registration(

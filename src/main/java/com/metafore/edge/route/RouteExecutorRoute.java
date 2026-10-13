@@ -67,6 +67,12 @@ public class RouteExecutorRoute extends RouteBuilder {
 
                 Map<String, Object> result = enforceCapability(action, routeId, cmd);
                 if (result != null) {
+                    // task 828b1be6: run_template must fail-fast with status=error
+                    // (not rejected) and echo template_id so platform can correlate.
+                    if ("run_template".equals(action)) {
+                        result.put("status", "error");
+                        result.put("template_id", cmd.getOrDefault("template_id", ""));
+                    }
                     exchange.getIn().setBody(result);
                     return;
                 }
@@ -486,16 +492,33 @@ public class RouteExecutorRoute extends RouteBuilder {
                 (List<Map<String, Object>>) execResult.get("data");
             String error = (String) execResult.get("error");
             String errorDetails = (String) execResult.get("error_details");
-            return MessageFactory.routeResult(config, routeId,
+            Map<String, Object> result = MessageFactory.routeResult(config, routeId,
                 status, action, latency, rowCount, null, data, error, errorDetails);
+            // Echo template_id so platform can correlate result to request.
+            if (execResult.containsKey("template_id")) {
+                result.put("template_id", execResult.get("template_id"));
+            }
+            return result;
         } catch (FhirTemplateExecutor.UnknownTemplateException e) {
-            return MessageFactory.routeResult(config, routeId,
-                "rejected", "run_template", 0, null, null, null,
+            // task 828b1be6: fail fast, never silent — error not rejected
+            Map<String, Object> r = MessageFactory.routeResult(config, routeId,
+                "error", "run_template", 0, null, null, null,
                 "unknown_template", e.getMessage());
+            r.put("template_id", templateId);
+            return r;
         } catch (FhirTemplateExecutor.UnknownParameterException e) {
-            return MessageFactory.routeResult(config, routeId,
-                "rejected", "run_template", 0, null, null, null,
+            Map<String, Object> r = MessageFactory.routeResult(config, routeId,
+                "error", "run_template", 0, null, null, null,
                 "unknown_parameter", e.getMessage());
+            r.put("template_id", templateId);
+            return r;
+        } catch (IllegalArgumentException e) {
+            // missing / invalid connection.base_url
+            Map<String, Object> r = MessageFactory.routeResult(config, routeId,
+                "error", "run_template", 0, null, null, null,
+                "invalid_connection", e.getMessage());
+            r.put("template_id", templateId);
+            return r;
         }
     }
 

@@ -13,8 +13,13 @@
     "status": { "type": "string", "enum": ["success", "error", "timeout", "rejected"] },
     "action": {
       "type": "string",
-      "enum": ["query", "execute", "shell", "http", "mcp", "connect_and_ping", "write_with_events", "deploy", "remove"],
+      "enum": ["query", "execute", "shell", "http", "mcp", "connect_and_ping", "write_with_events", "deploy", "remove", "run_template"],
       "description": "The command's action. A capability_denied reply (status rejected) echoes the refused command's action, which can be deploy or remove as well as execute, connect_and_ping or shell."
+    },
+    "template_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "adr-060 — the certified template a run_template command ran (or tried to run). Present on every run_template result, success or error; an error carries `error` (a code) and `error_details`. A command naming a template the edge does not carry is rejected before it runs and gets no result."
     },
     "latency_ms": { "type": "integer", "minimum": 0 },
     "row_count": { "type": "integer", "minimum": 0 },
