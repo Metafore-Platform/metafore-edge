@@ -106,7 +106,7 @@ class RouteExecutorRouteTest {
 
     /**
      * Probe an unresolvable host so we exercise the full
-     * handleConnectAndPing → ConnectionTester.probe → MessageFactory
+     * SourceCommands.connectAndPing → ConnectionTester.probe → MessageFactory
      * envelope path without needing a live PG. The dsRegistry must not
      * receive any side-effect for either success or failure.
      */
@@ -119,10 +119,6 @@ class RouteExecutorRouteTest {
             new TopicBuilder(cfg.tenantId(), cfg.controllerId());
         RouteExecutorRoute route =
             new RouteExecutorRoute(cfg, topics, registry);
-
-        Method m = RouteExecutorRoute.class.getDeclaredMethod(
-            "handleConnectAndPing", String.class, Map.class);
-        m.setAccessible(true);
 
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("db_host", "this-host-does-not-exist.invalid");
@@ -137,7 +133,7 @@ class RouteExecutorRouteTest {
 
         @SuppressWarnings("unchecked")
         Map<String, Object> result = (Map<String, Object>)
-            m.invoke(route, "test-probe-1", cmd);
+            SourceCommands.connectAndPing(cfg, "test-probe-1", cmd);
 
         // Typed reason routed through the error field.
         assertEquals("error", result.get("status"));
@@ -160,10 +156,6 @@ class RouteExecutorRouteTest {
         RouteExecutorRoute route =
             new RouteExecutorRoute(cfg, topics, registry);
 
-        Method m = RouteExecutorRoute.class.getDeclaredMethod(
-            "handleConnectAndPing", String.class, Map.class);
-        m.setAccessible(true);
-
         Map<String, Object> cmd = new HashMap<>();
         cmd.put("action", "connect_and_ping");
         cmd.put("route_id", "test-probe-2");
@@ -171,7 +163,7 @@ class RouteExecutorRouteTest {
 
         @SuppressWarnings("unchecked")
         Map<String, Object> result = (Map<String, Object>)
-            m.invoke(route, "test-probe-2", cmd);
+            SourceCommands.connectAndPing(cfg, "test-probe-2", cmd);
         // No db_host → ConnectionTester returns reason=unknown,
         // message="host is required".
         assertEquals("error", result.get("status"));
@@ -339,5 +331,46 @@ class RouteExecutorRouteTest {
             RouteYamlExtractor.PayloadKind.LEGACY,
             RouteYamlExtractor.classifyPayload(p, "SELECT 1")
         );
+    }
+
+    // ── part 2 interim guard: no Postgres SQL against another kind of server ──
+
+    @Test
+    void nonPostgresSourceIsRefusedBeforeSqlExecutor() throws Exception {
+        EdgeConfig cfg = EdgeConfig.from(java.util.Collections.emptyMap());
+        DataSourceRegistry registry = new DataSourceRegistry(new DefaultCamelContext());
+        RouteExecutorRoute route = new RouteExecutorRoute(cfg, new TopicBuilder(cfg.tenantId(), cfg.controllerId()), registry);
+        Method execute = RouteExecutorRoute.class.getDeclaredMethod("handleExecute", String.class, Map.class);
+        execute.setAccessible(true);
+
+        for (String type : new String[] {"mysql", "mariadb", "mssql", "oracle"}) {
+            Map<String, Object> params = new LinkedHashMap<>();
+            params.put("db_type", type);
+            params.put("db_host", "h.invalid");
+            params.put("db_name", "d");
+            params.put("db_user", "u");
+            params.put("db_pass", "p");
+            params.put("operation", "read");
+            params.put("table_name", "t");
+            Map<String, Object> cmd = new HashMap<>();
+            cmd.put("parameters", params);
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> result = (Map<String, Object>) execute.invoke(route, "r1", cmd);
+            assertEquals("error", result.get("status"), type);
+            assertEquals("dialect not yet supported for read (db_type " + type + ")", result.get("error"));
+            assertEquals("dialect_not_supported", result.get("error_details"));
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> pinged = SourceCommands.connectAndPing(cfg, "r2", cmd);
+            assertEquals("dialect_not_supported", pinged.get("error_details"), type);
+        }
+    }
+
+    @Test
+    void postgresAndUnsetTypePassTheGate() {
+        assertNull(com.metafore.edge.db.DialectGate.refusal(Map.of("operation", "read"), "read"));
+        assertNull(com.metafore.edge.db.DialectGate.refusal(Map.of("db_type", "postgresql"), "read"));
+        assertNull(com.metafore.edge.db.DialectGate.refusal(null, "read"));
     }
 }
