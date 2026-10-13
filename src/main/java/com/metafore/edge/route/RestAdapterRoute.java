@@ -3,8 +3,10 @@ package com.metafore.edge.route;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.metafore.edge.config.EdgeConfig;
 import com.metafore.edge.message.MessageFactory;
+import com.metafore.edge.topic.ReplyTopic;
 import com.metafore.edge.topic.TopicBuilder;
 import org.apache.camel.builder.RouteBuilder;
+import org.apache.camel.component.paho.PahoConstants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -70,12 +72,23 @@ public class RestAdapterRoute extends RouteBuilder {
                 @SuppressWarnings("unchecked")
                 Map<String, Object> cmd = exchange.getIn().getBody(Map.class);
 
+                // v2: platform's send_write_back_command waits on the command's response_topic
+                // (response/<tenant>/<controller>/<action_id>); only this edge's own per-edge topic is answered on.
+                exchange.setProperty("mfReplyTopic", ReplyTopic.forEdge(cmd.get("response_topic"), topics));
                 Map<String, Object> result = executeHttpCall(cmd);
                 exchange.getIn().setBody(result);
             })
             .marshal().json()
+            // one String the telemetry publish and the reply publish both send in full (a stream is read once)
+            .convertBodyTo(String.class)
             .to("paho:" + topics.telemetryRouteResults()
-                + "?brokerUrl=" + config.brokerUrl())
+                + "?brokerUrl=" + config.brokerUrl()).id("write-back-result-publish")
+            .choice()
+                .when(exchangeProperty("mfReplyTopic").isNotNull())
+                    // the topic goes in as a header on a FIXED endpoint, never into an endpoint URI built from the command
+                    .setHeader(PahoConstants.CAMEL_PAHO_OVERRIDE_TOPIC, exchangeProperty("mfReplyTopic"))
+                    .to("paho:" + topics.responsePrefix() + "reply?brokerUrl=" + config.brokerUrl()).id("write-back-reply-publish")
+            .end()
             .log("Write-back result published");
     }
 

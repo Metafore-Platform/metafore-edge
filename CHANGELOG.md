@@ -1,5 +1,10 @@
 # metafore-edge changelog
 
+## Unreleased (development, v2) — per-edge reply topic
+
+- **Add `topic/ReplyTopic`** (Compass 9a26adcd, adr-059). A command's `response_topic` is answered on only when it is this edge's own per-edge topic: `response/<tenant>/<controller>/` compared exactly, then an id of `[A-Za-z0-9._-]{1,128}` (an allowlist: no wildcard, no further level, no `?` or `&` that Camel would read as endpoint options, no space or control character). The retired shared `response/<id>`, another edge's topic and anything malformed are not answered on (logged at WARN); the result still goes to its telemetry topic. The broker would refuse such a publish anyway (an edge may publish only under `response/<its username>/`).
+- **`RouteExecutorRoute`, `RestAdapterRoute` (write-back) and `DiscoveryRoute`** publish the result to the command's valid reply topic (through a fixed endpoint with the topic as the `CamelPahoOverrideTopic` header, never an endpoint URI built from the command) as well as to `telemetry/.../route-results` (`.../discovery`). The discovery route used to echo to any topic the command named. The result is converted to one String before the two publishes so both carry it in full.
+
 ## Unreleased (development, v2) — an mTLS integration test against the platform's own broker
 
 - **Add `scripts/mtls-broker.sh`, `tests/mtls/` and `MqttMtlsIT`** (Compass 9a26adcd). CI job `mtls` of `development.yml` starts EMQX 5.8 with the platform chart's own `emqx.conf` and `acl.conf` (pinned byte for byte from metafore-api by `scripts/sync-broker-config.sh`; `BrokerConfigPinTest` fails offline on a hand edit) plus the chart's certificate listener (`tests/mtls/mtls.overlay.conf`), makes throw-away certificates with openssl, and runs the edge's real `MqttSecurity` against it: the broker names the client by its certificate's common name on `ssl:default`; the topic rules confine it; a stranger's certificate, no certificate and an untrusted broker are refused; the same factory presents whatever is on disk at the next connect. Runs on `development` only; `mvn verify` locally skips it unless `MTLS_DIR` is set.

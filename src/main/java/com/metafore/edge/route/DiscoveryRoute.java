@@ -3,8 +3,10 @@ package com.metafore.edge.route;
 import com.metafore.edge.config.EdgeConfig;
 import com.metafore.edge.message.MessageFactory;
 import com.metafore.edge.service.DiscoveryService;
+import com.metafore.edge.topic.ReplyTopic;
 import com.metafore.edge.topic.TopicBuilder;
 import org.apache.camel.builder.RouteBuilder;
+import org.apache.camel.component.paho.PahoConstants;
 
 import java.util.Collections;
 import java.util.Map;
@@ -63,26 +65,28 @@ public class DiscoveryRoute extends RouteBuilder {
                 // _handle_discovery keeps updating the graph. When no
                 // response_topic is present (startup discovery / legacy
                 // cores) only the telemetry publish happens — unchanged.
-                Object responseTopic = cmd.get("response_topic");
-                if (responseTopic instanceof String
-                    && !((String) responseTopic).isBlank()) {
-                    exchange.getIn().setHeader("mfResponseTopic", responseTopic);
-                }
+                // v2: only this edge's own per-edge topic, response/<tenant>/<controller>/<id> (topic/ReplyTopic);
+                // the retired shared response/<id>, another edge's topic and anything malformed are not answered on.
+                String responseTopic = ReplyTopic.forEdge(cmd.get("response_topic"), topics);
+                exchange.setProperty("mfReplyTopic", responseTopic);
                 Map<String, Object> capabilities =
                     DiscoveryService.execute(config.controllerId(), scope);
                 exchange.getIn().setBody(MessageFactory.discoveryResult(
                     config, UUID.randomUUID().toString(), trigger, capabilities));
             })
             .marshal().json()
+            // one String the telemetry publish and the reply publish both send in full (a stream is read once)
+            .convertBodyTo(String.class)
             .to("paho:" + topics.telemetryDiscovery()
-                + "?brokerUrl=" + config.brokerUrl())
+                + "?brokerUrl=" + config.brokerUrl()).id("discovery-result-publish")
             // Discover correlation fix — also deliver to the command's
             // response_topic so core's discover_and_wait
             // (response/{correlation_id}) resolves instead of timing out.
             .choice()
-                .when(header("mfResponseTopic").isNotNull())
-                    .toD("paho:${header.mfResponseTopic}"
-                        + "?brokerUrl=" + config.brokerUrl())
+                .when(exchangeProperty("mfReplyTopic").isNotNull())
+                    // the topic goes in as a header on a FIXED endpoint, never into an endpoint URI built from the command
+                    .setHeader(PahoConstants.CAMEL_PAHO_OVERRIDE_TOPIC, exchangeProperty("mfReplyTopic"))
+                    .to("paho:" + topics.responsePrefix() + "reply?brokerUrl=" + config.brokerUrl()).id("discovery-reply-publish")
             .end()
             .log("Discovery results published");
     }
