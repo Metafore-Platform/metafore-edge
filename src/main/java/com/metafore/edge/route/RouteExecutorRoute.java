@@ -1,12 +1,9 @@
 package com.metafore.edge.route;
 
-import com.metafore.edge.db.DbType;
-import com.metafore.edge.db.DialectGate;
-import com.metafore.edge.db.DbType.UnsupportedDbTypeException;
 import com.metafore.edge.config.EdgeConfig;
+import com.metafore.edge.db.DialectGate;
 import com.metafore.edge.message.MessageFactory;
 import com.metafore.edge.service.Capabilities;
-import com.metafore.edge.service.ConnectionTester;
 import com.metafore.edge.service.DataSourceRegistry;
 import com.metafore.edge.service.FhirTemplateExecutor;
 import com.metafore.edge.service.McpExecutor;
@@ -81,7 +78,7 @@ public class RouteExecutorRoute extends RouteBuilder {
                     // probe. Does NOT touch dsRegistry; does NOT route
                     // through SqlExecutor whitelist. See
                     // ConnectionTester for the typed-reason taxonomy.
-                    result = handleConnectAndPing(routeId, cmd);
+                    result = SourceCommands.connectAndPing(config, routeId, cmd);
                 } else if ("remove".equals(action)) {
                     dsRegistry.remove(routeId);
                     result = MessageFactory.routeResult(config, routeId,
@@ -179,28 +176,9 @@ public class RouteExecutorRoute extends RouteBuilder {
         }
 
         // Register DataSource if DB params present
-        if (params.containsKey("db_host") || params.containsKey("DB_HOST")) {
-            String dbHost = str(params, "db_host", "DB_HOST", "localhost");
-            DbType dbType;
-            try {
-                dbType = DbType.of(str(params, "db_type", "DB_TYPE", ""));
-            } catch (UnsupportedDbTypeException e) {
-                return MessageFactory.routeResult(config, routeId, "error", "execute", 0,
-                    null, null, null, e.getMessage(), null);
-            }
-            String dbPort = str(params, "db_port", "DB_PORT", dbType.defaultPort());
-            String dbName = str(params, "db_name", "DB_NAME", "");
-            String dbUser = str(params, "db_user", "DB_USER", "root");
-            String dbPass = str(params, "db_pass", "DB_PASS", "");
-            // adr — one pool per DATABASE, not one per request. Core mints a
-            // fresh route id per invocation for correlation, so registering
-            // under it made every read and write leak a connection pool: 3,121
-            // of them on the phluence controller before the JVM ran out of heap
-            // and stopped answering route commands (2026-08-30). The pool
-            // depends on where it connects, not on who asked.
-            dsRegistry.register(dbType,
-                DataSourceRegistry.connectionKey(dbType, dbHost, dbPort, dbName, dbUser),
-                dbHost, dbPort, dbName, dbUser, dbPass);
+        Map<String, Object> refusedSource = SourceCommands.register(config, dsRegistry, routeId, params);
+        if (refusedSource != null) {
+            return refusedSource;
         }
 
         // Check for shell command
@@ -266,33 +244,6 @@ public class RouteExecutorRoute extends RouteBuilder {
     }
 
     /**
-     * Which pool serves this command.
-     *
-     * The connection key when the command carries db params — the same key
-     * {@code handleExecute} registered under. Falls back to the route id, then
-     * (via the registry) to "default", so a command shaped differently than
-     * expected still reaches a database rather than failing with "no database
-     * connection available".
-     */
-    private static String dataSourceKey(Map<String, Object> params, String routeId) {
-        if (params != null
-            && (params.containsKey("db_host") || params.containsKey("DB_HOST"))) {
-            DbType type;
-            try {
-                type = DbType.of(str(params, "db_type", "DB_TYPE", ""));
-            } catch (UnsupportedDbTypeException e) {
-                return routeId; // handleExecute already refused this command
-            }
-            return DataSourceRegistry.connectionKey(type,
-                str(params, "db_host", "DB_HOST", "localhost"),
-                str(params, "db_port", "DB_PORT", type.defaultPort()),
-                str(params, "db_name", "DB_NAME", ""),
-                str(params, "db_user", "DB_USER", "root"));
-        }
-        return routeId;
-    }
-
-    /**
      * Slice 33.1.0 — parametric CRUD dispatch via JDBC PreparedStatement.
      * Reads structured payload, delegates to
      * ``SqlExecutor.executeParametric`` which validates table +
@@ -308,7 +259,7 @@ public class RouteExecutorRoute extends RouteBuilder {
             return MessageFactory.routeResult(config, routeId, "error", "execute", 0,
                 null, null, null, refused, DialectGate.REFUSAL);
         }
-        DataSource ds = dsRegistry.get(dataSourceKey(params, routeId));
+        DataSource ds = dsRegistry.get(SourceCommands.dataSourceKey(params, routeId));
         if (ds == null) {
             return MessageFactory.routeResult(config, routeId,
                 "error", "execute", 0, null, null, null,
@@ -517,59 +468,6 @@ public class RouteExecutorRoute extends RouteBuilder {
                 "rejected", "run_template", 0, null, null, null,
                 "unknown_parameter", e.getMessage());
         }
-    }
-
-    /**
-     * Phase 14.12 / MTBC.T1 — handle a {@code connect_and_ping} verb.
-     *
-     * <p>Reads {@code db_host}, {@code db_port}, {@code db_name},
-     * {@code db_user}, {@code db_pass} from the command parameters
-     * (case-tolerant per existing {@link #str} helper), opens a
-     * transient JDBC connection from the edge's <em>runtime context</em>,
-     * runs {@code SELECT version(), current_database()}, returns the
-     * standard routeResult envelope with the typed reason on failure.
-     *
-     * <p>Crucially: no side effect. {@link DataSourceRegistry} is NOT
-     * touched. The transient {@code DataSource} is closed via
-     * try-with-resources inside {@link ConnectionTester#probe} and goes
-     * out of scope when this method returns.
-     *
-     * <p>The probe action on the wire is {@code "connect_and_ping"} so
-     * core's response handler can demultiplex from routine reads.
-     * Error envelope uses the typed reason (e.g. {@code "host_unresolved"})
-     * as the {@code error} field — assistant routes on this without
-     * parsing free-text. The raw driver message goes in
-     * {@code error_details} for the diagnostic collapsible in the UI.
-     */
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> handleConnectAndPing(
-        String routeId, Map<String, Object> cmd
-    ) {
-        Map<String, Object> params = (Map<String, Object>)
-            cmd.getOrDefault("parameters", Collections.emptyMap());
-
-        String refused = DialectGate.refusal(params, "connect_and_ping");
-        if (refused != null) {
-            return MessageFactory.routeResult(config, routeId, "error", "connect_and_ping", 0,
-                null, null, null, refused, DialectGate.REFUSAL);
-        }
-        String dbHost = str(params, "db_host", "DB_HOST", "");
-        String dbPort = str(params, "db_port", "DB_PORT", "5432");
-        String dbName = str(params, "db_name", "DB_NAME", "");
-        String dbUser = str(params, "db_user", "DB_USER", "");
-        String dbPass = str(params, "db_pass", "DB_PASS", "");
-
-        ConnectionTester.ProbeResult probe =
-            ConnectionTester.probe(dbHost, dbPort, dbName, dbUser, dbPass);
-
-        if (probe.ok()) {
-            return MessageFactory.routeResult(config, routeId,
-                "success", "connect_and_ping", probe.latencyMs(),
-                null, null, probe.data(), null, null);
-        }
-        return MessageFactory.routeResult(config, routeId,
-            "error", "connect_and_ping", probe.latencyMs(),
-            null, null, null, probe.reason(), probe.message());
     }
 
     private static String str(Map<String, Object> params,

@@ -106,7 +106,7 @@ class RouteExecutorRouteTest {
 
     /**
      * Probe an unresolvable host so we exercise the full
-     * handleConnectAndPing → ConnectionTester.probe → MessageFactory
+     * SourceCommands.connectAndPing → ConnectionTester.probe → MessageFactory
      * envelope path without needing a live PG. The dsRegistry must not
      * receive any side-effect for either success or failure.
      */
@@ -119,10 +119,6 @@ class RouteExecutorRouteTest {
             new TopicBuilder(cfg.tenantId(), cfg.controllerId());
         RouteExecutorRoute route =
             new RouteExecutorRoute(cfg, topics, registry);
-
-        Method m = RouteExecutorRoute.class.getDeclaredMethod(
-            "handleConnectAndPing", String.class, Map.class);
-        m.setAccessible(true);
 
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("db_host", "this-host-does-not-exist.invalid");
@@ -137,7 +133,7 @@ class RouteExecutorRouteTest {
 
         @SuppressWarnings("unchecked")
         Map<String, Object> result = (Map<String, Object>)
-            m.invoke(route, "test-probe-1", cmd);
+            SourceCommands.connectAndPing(cfg, "test-probe-1", cmd);
 
         // Typed reason routed through the error field.
         assertEquals("error", result.get("status"));
@@ -160,10 +156,6 @@ class RouteExecutorRouteTest {
         RouteExecutorRoute route =
             new RouteExecutorRoute(cfg, topics, registry);
 
-        Method m = RouteExecutorRoute.class.getDeclaredMethod(
-            "handleConnectAndPing", String.class, Map.class);
-        m.setAccessible(true);
-
         Map<String, Object> cmd = new HashMap<>();
         cmd.put("action", "connect_and_ping");
         cmd.put("route_id", "test-probe-2");
@@ -171,7 +163,7 @@ class RouteExecutorRouteTest {
 
         @SuppressWarnings("unchecked")
         Map<String, Object> result = (Map<String, Object>)
-            m.invoke(route, "test-probe-2", cmd);
+            SourceCommands.connectAndPing(cfg, "test-probe-2", cmd);
         // No db_host → ConnectionTester returns reason=unknown,
         // message="host is required".
         assertEquals("error", result.get("status"));
@@ -350,8 +342,6 @@ class RouteExecutorRouteTest {
         RouteExecutorRoute route = new RouteExecutorRoute(cfg, new TopicBuilder(cfg.tenantId(), cfg.controllerId()), registry);
         Method execute = RouteExecutorRoute.class.getDeclaredMethod("handleExecute", String.class, Map.class);
         execute.setAccessible(true);
-        Method ping = RouteExecutorRoute.class.getDeclaredMethod("handleConnectAndPing", String.class, Map.class);
-        ping.setAccessible(true);
 
         for (String type : new String[] {"mysql", "mariadb", "mssql", "oracle"}) {
             Map<String, Object> params = new LinkedHashMap<>();
@@ -372,7 +362,7 @@ class RouteExecutorRouteTest {
             assertEquals("dialect_not_supported", result.get("error_details"));
 
             @SuppressWarnings("unchecked")
-            Map<String, Object> pinged = (Map<String, Object>) ping.invoke(route, "r2", cmd);
+            Map<String, Object> pinged = SourceCommands.connectAndPing(cfg, "r2", cmd);
             assertEquals("dialect_not_supported", pinged.get("error_details"), type);
         }
     }
