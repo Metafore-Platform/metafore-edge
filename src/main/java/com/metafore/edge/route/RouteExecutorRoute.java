@@ -1,5 +1,7 @@
 package com.metafore.edge.route;
 
+import com.metafore.edge.db.DbType;
+import com.metafore.edge.db.DbType.UnsupportedDbTypeException;
 import com.metafore.edge.config.EdgeConfig;
 import com.metafore.edge.message.MessageFactory;
 import com.metafore.edge.service.Capabilities;
@@ -178,7 +180,14 @@ public class RouteExecutorRoute extends RouteBuilder {
         // Register DataSource if DB params present
         if (params.containsKey("db_host") || params.containsKey("DB_HOST")) {
             String dbHost = str(params, "db_host", "DB_HOST", "localhost");
-            String dbPort = str(params, "db_port", "DB_PORT", "5432");
+            DbType dbType;
+            try {
+                dbType = DbType.of(str(params, "db_type", "DB_TYPE", ""));
+            } catch (UnsupportedDbTypeException e) {
+                return MessageFactory.routeResult(config, routeId, "error", "execute", 0,
+                    null, null, null, e.getMessage(), null);
+            }
+            String dbPort = str(params, "db_port", "DB_PORT", dbType.defaultPort());
             String dbName = str(params, "db_name", "DB_NAME", "");
             String dbUser = str(params, "db_user", "DB_USER", "root");
             String dbPass = str(params, "db_pass", "DB_PASS", "");
@@ -188,8 +197,8 @@ public class RouteExecutorRoute extends RouteBuilder {
             // of them on the phluence controller before the JVM ran out of heap
             // and stopped answering route commands (2026-08-30). The pool
             // depends on where it connects, not on who asked.
-            dsRegistry.register(
-                DataSourceRegistry.connectionKey(dbHost, dbPort, dbName, dbUser),
+            dsRegistry.register(dbType,
+                DataSourceRegistry.connectionKey(dbType, dbHost, dbPort, dbName, dbUser),
                 dbHost, dbPort, dbName, dbUser, dbPass);
         }
 
@@ -267,9 +276,15 @@ public class RouteExecutorRoute extends RouteBuilder {
     private static String dataSourceKey(Map<String, Object> params, String routeId) {
         if (params != null
             && (params.containsKey("db_host") || params.containsKey("DB_HOST"))) {
-            return DataSourceRegistry.connectionKey(
+            DbType type;
+            try {
+                type = DbType.of(str(params, "db_type", "DB_TYPE", ""));
+            } catch (UnsupportedDbTypeException e) {
+                return routeId; // handleExecute already refused this command
+            }
+            return DataSourceRegistry.connectionKey(type,
                 str(params, "db_host", "DB_HOST", "localhost"),
-                str(params, "db_port", "DB_PORT", "5432"),
+                str(params, "db_port", "DB_PORT", type.defaultPort()),
                 str(params, "db_name", "DB_NAME", ""),
                 str(params, "db_user", "DB_USER", "root"));
         }

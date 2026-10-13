@@ -93,6 +93,24 @@
       <artifactId>postgresql</artifactId>
       <version>42.7.4</version>
     </dependency>
+    <!-- The other databases a source can be (v2 parity with the Go agent; Compass 0e4dda60, adr-059). MySQL and MariaDB both
+         use the MariaDB Connector/J (LGPL; mysql-connector-j is GPLv2 + FOSS exception, a licence risk in a product we ship).
+         mssql-jdbc is MIT; ojdbc is Oracle's free-use licence. -->
+    <dependency>
+      <groupId>org.mariadb.jdbc</groupId>
+      <artifactId>mariadb-java-client</artifactId>
+      <version>3.5.1</version>
+    </dependency>
+    <dependency>
+      <groupId>com.microsoft.sqlserver</groupId>
+      <artifactId>mssql-jdbc</artifactId>
+      <version>12.8.1.jre11</version>
+    </dependency>
+    <dependency>
+      <groupId>com.oracle.database.jdbc</groupId>
+      <artifactId>ojdbc11</artifactId>
+      <version>23.5.0.24.07</version>
+    </dependency>
 
     <!-- Logging -->
     <dependency>

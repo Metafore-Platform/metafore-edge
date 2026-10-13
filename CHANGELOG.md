@@ -1,5 +1,10 @@
 # metafore-edge changelog
 
+## Unreleased (development, v2) — more source databases, part 1: types, dialects, pools
+
+- **Add `db/DbType`, `db/Dialect`, `db/DataSources`** (Compass 0e4dda60, adr-059). A command's `db_type` (`postgresql` default, `mysql`, `mariadb`, `mssql`/`sqlserver`, `oracle`) picks the JDBC driver (MariaDB Connector/J for both MySQL and MariaDB, mssql-jdbc, ojdbc11), the default port and the dialect's SQL fragments (quoting, page limit, case-insensitive contains, count alias; the Go agent's `dialect.go` is the reference). Timeouts match the Postgres pool; the password is never in the URL.
+- **`DataSourceRegistry`** registers a pool per type; the type is part of the fingerprint, and a non-Postgres key carries it (`conn:mysql:...`) while a Postgres key is unchanged. **`RouteExecutorRoute`** reads `db_type` and answers an unknown one with an error result `Unsupported db_type: <name> (expected ...)`. Operations still run Postgres SQL until part 2's next PR.
+
 ## Unreleased (development, v2) — per-edge reply topic
 
 - **Add `topic/ReplyTopic`** (Compass 9a26adcd, adr-059). A command's `response_topic` is answered on only when it is this edge's own per-edge topic: `response/<tenant>/<controller>/` compared exactly, then an id of `[A-Za-z0-9._-]{1,128}` (an allowlist: no wildcard, no further level, no `?` or `&` that Camel would read as endpoint options, no space or control character). The retired shared `response/<id>`, another edge's topic and anything malformed are not answered on (logged at WARN); the result still goes to its telemetry topic. The broker would refuse such a publish anyway (an edge may publish only under `response/<its username>/`).
