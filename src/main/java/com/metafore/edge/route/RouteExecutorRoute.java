@@ -5,6 +5,7 @@ import com.metafore.edge.message.MessageFactory;
 import com.metafore.edge.service.Capabilities;
 import com.metafore.edge.service.ConnectionTester;
 import com.metafore.edge.service.DataSourceRegistry;
+import com.metafore.edge.service.FhirTemplateExecutor;
 import com.metafore.edge.service.McpExecutor;
 import com.metafore.edge.service.ShellExecutor;
 import com.metafore.edge.service.SqlExecutor;
@@ -20,23 +21,26 @@ public class RouteExecutorRoute extends RouteBuilder {
     private final TopicBuilder topics;
     private final DataSourceRegistry dsRegistry;
     private final McpExecutor mcpExecutor;
+    private final FhirTemplateExecutor fhirExecutor;
 
     public RouteExecutorRoute(EdgeConfig config, TopicBuilder topics,
                               DataSourceRegistry dsRegistry) {
-        this(config, topics, dsRegistry, new McpExecutor());
+        this(config, topics, dsRegistry, new McpExecutor(), new FhirTemplateExecutor());
     }
 
     /**
-     * adr-158 — test-friendly constructor accepting a pre-built
-     * {@link McpExecutor} (wrapping a mock HttpClient) so the MCP
-     * dispatch branch is exercised without a live MCP server.
+     * Test-friendly constructor accepting pre-built executors (wrapping mock
+     * HttpClients) so MCP and FHIR dispatch branches are exercised without
+     * live servers. adr-158 (MCP), task 828b1be6 (FHIR).
      */
     RouteExecutorRoute(EdgeConfig config, TopicBuilder topics,
-                       DataSourceRegistry dsRegistry, McpExecutor mcpExecutor) {
+                       DataSourceRegistry dsRegistry, McpExecutor mcpExecutor,
+                       FhirTemplateExecutor fhirExecutor) {
         this.config = config;
         this.topics = topics;
         this.dsRegistry = dsRegistry;
         this.mcpExecutor = mcpExecutor;
+        this.fhirExecutor = fhirExecutor;
     }
 
     @Override
@@ -75,6 +79,9 @@ public class RouteExecutorRoute extends RouteBuilder {
                     dsRegistry.remove(routeId);
                     result = MessageFactory.routeResult(config, routeId,
                         "success", null, 0, null, null, null, null, null);
+                } else if ("run_template".equals(action)) {
+                    // task 828b1be6 — FHIR template registry
+                    result = handleRunTemplate(routeId, cmd);
                 } else {
                     result = MessageFactory.routeResult(config, routeId,
                         "error", null, 0, null, null, null,
@@ -177,7 +184,7 @@ public class RouteExecutorRoute extends RouteBuilder {
         // Check for shell command
         String shellCmd = params != null ? (String) params.get("shell_command") : null;
         if (shellCmd == null && routeYaml != null && routeYaml.contains("exec:")) {
-            shellCmd = extractShellCommand(routeYaml);
+            shellCmd = RouteYamlExtractor.extractShellCommand(routeYaml);
         }
 
         if (shellCmd != null && !shellCmd.isEmpty()) {
@@ -199,9 +206,10 @@ public class RouteExecutorRoute extends RouteBuilder {
         // raw-SQL command can reach the database.
         String legacySql = params != null ? (String) params.get("sql") : null;
         if (legacySql == null && routeYaml != null) {
-            legacySql = extractQuery(routeYaml);
+            legacySql = RouteYamlExtractor.extractQuery(routeYaml);
         }
-        PayloadKind kind = classifyPayload(params, legacySql);
+        RouteYamlExtractor.PayloadKind kind =
+            RouteYamlExtractor.classifyPayload(params, legacySql);
         switch (kind) {
             case AMBIGUOUS:
                 return MessageFactory.routeResult(config, routeId,
@@ -233,29 +241,6 @@ public class RouteExecutorRoute extends RouteBuilder {
             default:
                 throw new IllegalStateException("PayloadKind: " + kind);
         }
-    }
-
-    /**
-     * Slice 33.1.0 — payload-shape classifier for the dispatch
-     * boundary. Package-private so the four-state branching is
-     * directly testable without Camel scaffolding.
-     */
-    enum PayloadKind { PARAMETRIC, LEGACY, AMBIGUOUS, MISSING }
-
-    static PayloadKind classifyPayload(
-        Map<String, Object> params, String legacySql
-    ) {
-        boolean hasOperation = false;
-        if (params != null) {
-            Object op = params.get("operation");
-            if (op instanceof String) {
-                hasOperation = !((String) op).isBlank();
-            }
-        }
-        boolean hasSql = legacySql != null && !legacySql.isEmpty();
-        if (hasOperation && hasSql) return PayloadKind.AMBIGUOUS;
-        if (!hasOperation && !hasSql) return PayloadKind.MISSING;
-        return hasOperation ? PayloadKind.PARAMETRIC : PayloadKind.LEGACY;
     }
 
     /**
@@ -464,6 +449,45 @@ public class RouteExecutorRoute extends RouteBuilder {
     // can reach the database.
 
     /**
+     * task 828b1be6 — dispatch a {@code run_template} command to
+     * {@link FhirTemplateExecutor} and wrap the result in the standard
+     * route-result envelope.
+     */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> handleRunTemplate(
+        String routeId, Map<String, Object> cmd
+    ) {
+        String templateId = (String) cmd.getOrDefault("template_id", "");
+        Map<String, Object> connection = (Map<String, Object>)
+            cmd.getOrDefault("connection", Map.of());
+        Map<String, Object> params = (Map<String, Object>)
+            cmd.getOrDefault("parameters", Map.of());
+        try {
+            Map<String, Object> execResult =
+                fhirExecutor.execute(templateId, connection, params);
+            String status = (String) execResult.get("status");
+            String action = (String) execResult.getOrDefault("action", "run_template");
+            long latency =
+                ((Number) execResult.getOrDefault("latency_ms", 0L)).longValue();
+            Integer rowCount = (Integer) execResult.get("row_count");
+            List<Map<String, Object>> data =
+                (List<Map<String, Object>>) execResult.get("data");
+            String error = (String) execResult.get("error");
+            String errorDetails = (String) execResult.get("error_details");
+            return MessageFactory.routeResult(config, routeId,
+                status, action, latency, rowCount, null, data, error, errorDetails);
+        } catch (FhirTemplateExecutor.UnknownTemplateException e) {
+            return MessageFactory.routeResult(config, routeId,
+                "rejected", "run_template", 0, null, null, null,
+                "unknown_template", e.getMessage());
+        } catch (FhirTemplateExecutor.UnknownParameterException e) {
+            return MessageFactory.routeResult(config, routeId,
+                "rejected", "run_template", 0, null, null, null,
+                "unknown_parameter", e.getMessage());
+        }
+    }
+
+    /**
      * Phase 14.12 / MTBC.T1 — handle a {@code connect_and_ping} verb.
      *
      * <p>Reads {@code db_host}, {@code db_port}, {@code db_name},
@@ -518,31 +542,4 @@ public class RouteExecutorRoute extends RouteBuilder {
         return v != null ? String.valueOf(v) : def;
     }
 
-    static String extractQuery(String routeYaml) {
-        if (routeYaml == null) return null;
-        int idx = routeYaml.indexOf("query:");
-        if (idx < 0) idx = routeYaml.indexOf("query :");
-        if (idx < 0) return null;
-        String after = routeYaml.substring(idx + 6).trim();
-        if (after.startsWith(">")) after = after.substring(1).trim();
-        StringBuilder sb = new StringBuilder();
-        for (String line : after.split("\n")) {
-            String trimmed = line.trim();
-            if (sb.length() > 0 && !trimmed.isEmpty()
-                && (trimmed.startsWith("-") || trimmed.contains(":"))) break;
-            if (!trimmed.isEmpty()) {
-                if (sb.length() > 0) sb.append(" ");
-                sb.append(trimmed);
-            }
-        }
-        return sb.toString().trim();
-    }
-
-    static String extractShellCommand(String routeYaml) {
-        if (routeYaml == null) return null;
-        int idx = routeYaml.indexOf("exec:");
-        if (idx < 0) return null;
-        String after = routeYaml.substring(idx + 5).trim();
-        return after.split("\n")[0].trim();
-    }
 }

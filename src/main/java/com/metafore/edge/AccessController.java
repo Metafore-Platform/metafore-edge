@@ -4,6 +4,7 @@ import com.metafore.edge.config.EdgeConfig;
 import com.metafore.edge.mqtt.MqttSecurity;
 import com.metafore.edge.route.*;
 import com.metafore.edge.service.DataSourceRegistry;
+import com.metafore.edge.service.FhirTemplateExecutor;
 import com.metafore.edge.topic.TopicBuilder;
 import org.apache.camel.CamelContext;
 import org.apache.camel.impl.DefaultCamelContext;
@@ -49,6 +50,9 @@ public class AccessController {
         CamelContext context = new DefaultCamelContext();
         context.addComponent("paho", mqtt.component());
         DataSourceRegistry dsRegistry = new DataSourceRegistry(context);
+        // task 828b1be6 — FHIR template routes (shared across tenants; no per-tenant state)
+        FhirTemplateExecutor fhirExecutor = new FhirTemplateExecutor();
+        context.addRoutes(new FhirTemplateRoutes(fhirExecutor));
 
         // Register default DataSource if DB is available
         if (!config.dbHost().isEmpty()) {
