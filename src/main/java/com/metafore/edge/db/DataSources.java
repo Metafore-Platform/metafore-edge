@@ -34,7 +34,7 @@ public final class DataSources {
         throws SQLException {
         int portNumber = Integer.parseInt(port == null || port.isBlank() ? type.defaultPort() : port.trim());
         return switch (type) {
-            case MYSQL, MARIADB -> mariadb(host, portNumber, dbName, user, password);
+            case MYSQL, MARIADB -> mariadb(type, host, portNumber, dbName, user, password);
             case MSSQL -> mssql(host, portNumber, dbName, user, password);
             case ORACLE -> oracle(host, portNumber, dbName, user, password);
             case POSTGRESQL -> throw new IllegalArgumentException("Postgres data sources are built by DataSourceRegistry");
@@ -53,15 +53,24 @@ public final class DataSources {
         };
     }
 
-    private static DataSource mariadb(String host, int port, String dbName, String user, String password) throws SQLException {
+    private static DataSource mariadb(DbType type, String host, int port, String dbName, String user, String password) throws SQLException {
         MariaDbDataSource ds = new MariaDbDataSource();
-        // MySQL servers are served by the same driver. A UTC session and a bounded InnoDB lock wait, as the other pools have.
-        ds.setUrl(url(DbType.MARIADB, host, Integer.toString(port), dbName)
-            + "?connectTimeout=" + LOGIN_TIMEOUT_SECONDS * 1000 + "&socketTimeout=" + SOCKET_TIMEOUT_MS
-            + "&sessionVariables=innodb_lock_wait_timeout=" + LOCK_TIMEOUT_MS / 1000);
+        ds.setUrl(mariadbUrl(type, host, port, dbName));
         ds.setUser(user);
         ds.setPassword(password);
         return ds;
+    }
+
+    /** The Connector/J URL (with options, no credentials) a MySQL or MariaDB source connects with. */
+    static String mariadbUrl(DbType type, String host, int port, String dbName) {
+        // MySQL servers are served by the same driver. A bounded InnoDB lock wait, as the other pools have.
+        return url(DbType.MARIADB, host, Integer.toString(port), dbName)
+            + "?connectTimeout=" + LOGIN_TIMEOUT_SECONDS * 1000 + "&socketTimeout=" + SOCKET_TIMEOUT_MS
+            + "&sessionVariables=innodb_lock_wait_timeout=" + LOCK_TIMEOUT_MS / 1000
+            // MySQL 8's default login (caching_sha2_password) sends the password only over TLS: encrypt the connection, without
+            // checking the server's certificate (as Connector/J's sslMode=PREFERRED does with a self-signed one). MariaDB servers
+            // ship without TLS, so db_type=mariadb connects as it is.
+            + (type == DbType.MYSQL ? "&sslMode=trust" : "");
     }
 
     private static DataSource mssql(String host, int port, String dbName, String user, String password) {

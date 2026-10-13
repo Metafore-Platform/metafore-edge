@@ -32,6 +32,12 @@ class DataSourcesTest {
     }
 
     @Test
+    void onlyMysqlAsksForTls() {
+        assertTrue(DataSources.mariadbUrl(DbType.MYSQL, "h", 3306, "d").contains("sslMode=trust"));
+        assertFalse(DataSources.mariadbUrl(DbType.MARIADB, "h", 3306, "d").contains("sslMode"));
+    }
+
+    @Test
     void registryKeysCarryTheTypeExceptForPostgres() {
         String legacy = DataSourceRegistry.connectionKey("h", "5432", "d", "u");
         assertEquals(legacy, DataSourceRegistry.connectionKey(DbType.POSTGRESQL, "h", "5432", "d", "u"));
