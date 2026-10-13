@@ -125,27 +125,26 @@ class MessageFactoryTest {
     // ── Phase 14.18 — tenants array on registration payload ──────────
 
     @Test
-    void registrationWithTenantsListEmitsArray() throws Exception {
+    void registrationWithTenantsArgDoesNotEmitField() throws Exception {
+        // ADR-023: one tenant per edge in v2; tenants param accepted for
+        // call-site compat but must not appear in the payload.
         Map<String, Object> msg = MessageFactory.registration(
             config, List.of("jdbc"), "postgresql", "localhost", 5432,
             "native", Map.of("os_name", "Linux"),
             List.of("metafore-corp", "metafore-walkthrough"));
-        assertEquals(
-            List.of("metafore-corp", "metafore-walkthrough"),
-            msg.get("tenants"));
-        // `tenants` (Phase 14.18) is not yet in the pinned registration
-        // contract schema — see gap reported to 36 via workshop cross-session.
-        // Schema validation skipped for this field until the contract is updated.
+        assertFalse(msg.containsKey("tenants"),
+            "ADR-023: tenants must not be emitted in registration payload");
+        validate(msg, "registration.schema.json");
     }
 
     @Test
-    void registrationWithSingleTenantValidates() throws Exception {
+    void registrationWithSingleTenantArgDoesNotEmitField() throws Exception {
         Map<String, Object> msg = MessageFactory.registration(
             config, List.of("jdbc"), "postgresql", "localhost", 5432,
             "native", null, List.of("metafore-corp"));
-        assertEquals(List.of("metafore-corp"), msg.get("tenants"));
-        // `tenants` (Phase 14.18) is not yet in the pinned registration
-        // contract schema — schema validation skipped (see gap reported to 36).
+        assertFalse(msg.containsKey("tenants"),
+            "ADR-023: tenants must not be emitted in registration payload");
+        validate(msg, "registration.schema.json");
     }
 
     @Test
@@ -179,23 +178,15 @@ class MessageFactoryTest {
     }
 
     @Test
-    void registrationTenantsArrayIsDefensivelyCopied() {
-        // Caller may pass an unmodifiable List from EdgeConfig#tenants().
-        // The composer must emit a mutable copy so downstream JSON
-        // serialization + test assertions don't fight with the
-        // unmodifiable view.
+    void registrationTenantsArgIsNeverEmitted() {
+        // ADR-023: tenants param is accepted for call-site compat but must
+        // never appear in the payload regardless of what is passed.
         List<String> source = List.of("a", "b");
         Map<String, Object> msg = MessageFactory.registration(
             config, List.of("jdbc"), null, null, null,
             null, null, source);
-        Object emitted = msg.get("tenants");
-        assertTrue(emitted instanceof List);
-        // Mutable: should not throw.
-        @SuppressWarnings("unchecked")
-        List<String> emittedList = (List<String>) emitted;
-        emittedList.add("c");
-        // Source list is unchanged (no aliasing into msg).
-        assertEquals(List.of("a", "b"), source);
+        assertFalse(msg.containsKey("tenants"),
+            "ADR-023: tenants must not be emitted even when a non-empty list is passed");
     }
 
     @Test

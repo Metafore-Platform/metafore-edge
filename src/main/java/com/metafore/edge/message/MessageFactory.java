@@ -56,31 +56,13 @@ public final class MessageFactory {
     }
 
     /**
-     * Phase 14.18 — extended registration payload composer with
-     * {@code tenants} array support.
+     * Registration payload composer (8-arg overload — {@code tenants} param
+     * is kept for call-site compatibility but silently ignored).
      *
-     * <p>Wire fields (in order):
-     * <ul>
-     *   <li>{@code controller_id}, {@code tenant_id} (singleton —
-     *       legacy single-tenant edges + back-compat for cores that
-     *       ignore the {@code tenants} array)</li>
-     *   <li>{@code timestamp}, {@code version}, {@code capabilities}</li>
-     *   <li>{@code db_type}, {@code db_host}, {@code db_port},
-     *       {@code db_name} (when set)</li>
-     *   <li>{@code runtime}, {@code runtime_hints} (Phase 14.9 —
-     *       omitted when null/blank/empty)</li>
-     *   <li>{@code tenants: [slug,...]} (Phase 14.18 — omitted when
-     *       null/empty; emitted only when the edge declares
-     *       {@code TENANT_IDS=a,b,...}). When present, core's
-     *       {@code _handle_registration} writes one
-     *       {@code (:Tenant)-[:HAS_CONTROLLER]->(:AccessController)}
-     *       edge per tenant slug. Bindings are additive.</li>
-     * </ul>
-     *
-     * <p>All fields except controller_id / tenant_id / timestamp /
-     * version / capabilities are OPTIONAL on the schema (see
-     * {@code contracts/mqtt/registration.schema.json}) so older cores
-     * ignore unknown fields.
+     * ADR-023: one tenant per edge in v2; TENANT_IDS / multi-tenant
+     * registration payloads are forbidden. The {@code tenants} field is
+     * not in the pinned {@code registration.schema.json}
+     * (additionalProperties:false) and must never be emitted.
      */
     public static Map<String, Object> registration(EdgeConfig config,
             List<String> capabilities, String dbType, String dbHost, Integer dbPort,
@@ -110,13 +92,6 @@ public final class MessageFactory {
         }
         if (runtimeHints != null && !runtimeHints.isEmpty()) {
             msg.put("runtime_hints", runtimeHints);
-        }
-        if (tenants != null && !tenants.isEmpty()) {
-            // Phase 14.18 — Defensive copy: caller may pass an
-            // unmodifiable view from EdgeConfig#tenants(). Serialization
-            // doesn't mutate, but downstream tests inspect msg directly,
-            // so emit a plain LinkedHashList equivalent.
-            msg.put("tenants", new java.util.ArrayList<>(tenants));
         }
         return msg;
     }
