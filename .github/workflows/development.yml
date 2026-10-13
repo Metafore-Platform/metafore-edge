@@ -44,6 +44,29 @@ jobs:
       - name: Build and run the unit and contract tests
         run: mvn package -B
 
+  # task 828b1be6 — FhirPatientReadIT hits the public HAPI FHIR R4 sandbox.
+  # It is deliberately separate from the 'test' job (which runs mvn package
+  # and never invokes failsafe) so an outage of hapi.fhir.org cannot block
+  # the main build. This job is required to pass on development PRs.
+  fhir-it:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+      - name: FHIR integration test (live HAPI R4 sandbox)
+        run: mvn -B verify -Dtest=NONE -Dsurefire.failIfNoSpecifiedTests=false -Dit.test=FhirPatientReadIT
+      - name: It must have run, not been skipped
+        run: |
+          cat target/failsafe-reports/*FhirPatientReadIT.txt
+          grep -q "Tests run: [1-9]" target/failsafe-reports/*FhirPatientReadIT.txt
+          grep -q "Skipped: 0" target/failsafe-reports/*FhirPatientReadIT.txt
+
   # The real broker: the platform chart's own EMQX configuration, certificate listener and topic rules, with throw-away
   # certificates; the edge signs in to it with its certificate (scripts/mtls-broker.sh, MqttMtlsIT).
   mtls:

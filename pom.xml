@@ -68,6 +68,9 @@
       <artifactId>camel-csv</artifactId>
       <version>${camel.version}</version>
     </dependency>
+    <!-- task 828b1be6 — FhirTemplateExecutor uses java.net.http directly,
+         not the Camel FHIR component; camel-fhir is therefore omitted to
+         avoid pulling in HAPI FHIR as an unnecessary CVE surface. -->
     <!-- CsvMapper for header-bearing partner files. Declared explicitly rather
          than leaned on transitively: camel-csv uses commons-csv, so relying on
          this arriving by accident is how a build breaks on a dependency bump. -->
@@ -117,6 +120,13 @@
       <version>1.3.3</version>
       <scope>test</scope>
     </dependency>
+    <!-- task 828b1be6 — Mockito for FhirTemplateExecutorTest HttpClient mocking -->
+    <dependency>
+      <groupId>org.mockito</groupId>
+      <artifactId>mockito-core</artifactId>
+      <version>5.11.0</version>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 
   <build>
@@ -141,6 +151,8 @@
           <excludes>
             <exclude>**/*IT.java</exclude>
           </excludes>
+          <!-- Mockito inline mock maker needs dynamic agent loading on JDK 21+ -->
+          <argLine>-XX:+EnableDynamicAgentLoading</argLine>
         </configuration>
       </plugin>
       <plugin>

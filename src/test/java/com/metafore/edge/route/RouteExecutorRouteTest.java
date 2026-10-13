@@ -20,31 +20,31 @@ class RouteExecutorRouteTest {
     @Test
     void extractQueryFromYaml() {
         String yaml = "name: test-route\nquery: SELECT * FROM users\nparams: none";
-        assertEquals("SELECT * FROM users", RouteExecutorRoute.extractQuery(yaml));
+        assertEquals("SELECT * FROM users", RouteYamlExtractor.extractQuery(yaml));
     }
 
     @Test
     void extractQueryMultiLine() {
         String yaml = "query: >\n  SELECT *\n  FROM users\n- next_section";
-        assertEquals("SELECT * FROM users", RouteExecutorRoute.extractQuery(yaml));
+        assertEquals("SELECT * FROM users", RouteYamlExtractor.extractQuery(yaml));
     }
 
     @Test
     void extractQueryNull() {
-        assertNull(RouteExecutorRoute.extractQuery(null));
-        assertNull(RouteExecutorRoute.extractQuery("no query here"));
+        assertNull(RouteYamlExtractor.extractQuery(null));
+        assertNull(RouteYamlExtractor.extractQuery("no query here"));
     }
 
     @Test
     void extractShellCommand() {
         String yaml = "exec: ps aux\nnext: value";
-        assertEquals("ps aux", RouteExecutorRoute.extractShellCommand(yaml));
+        assertEquals("ps aux", RouteYamlExtractor.extractShellCommand(yaml));
     }
 
     @Test
     void extractShellCommandNull() {
-        assertNull(RouteExecutorRoute.extractShellCommand(null));
-        assertNull(RouteExecutorRoute.extractShellCommand("no exec here"));
+        assertNull(RouteYamlExtractor.extractShellCommand(null));
+        assertNull(RouteYamlExtractor.extractShellCommand("no exec here"));
     }
 
     // ── Slice 33.1.0 — payload classification at dispatch boundary ──
@@ -55,8 +55,8 @@ class RouteExecutorRouteTest {
         p.put("operation", "create");
         p.put("table_name", "gtm_accounts");
         assertEquals(
-            RouteExecutorRoute.PayloadKind.PARAMETRIC,
-            RouteExecutorRoute.classifyPayload(p, null)
+            RouteYamlExtractor.PayloadKind.PARAMETRIC,
+            RouteYamlExtractor.classifyPayload(p, null)
         );
     }
 
@@ -65,8 +65,8 @@ class RouteExecutorRouteTest {
         java.util.Map<String, Object> p = new java.util.HashMap<>();
         // No 'operation' key — legacy SQL path.
         assertEquals(
-            RouteExecutorRoute.PayloadKind.LEGACY,
-            RouteExecutorRoute.classifyPayload(p, "SELECT 1")
+            RouteYamlExtractor.PayloadKind.LEGACY,
+            RouteYamlExtractor.classifyPayload(p, "SELECT 1")
         );
     }
 
@@ -78,8 +78,8 @@ class RouteExecutorRouteTest {
         java.util.Map<String, Object> p = new java.util.HashMap<>();
         p.put("operation", "create");
         assertEquals(
-            RouteExecutorRoute.PayloadKind.AMBIGUOUS,
-            RouteExecutorRoute.classifyPayload(p, "SELECT 1")
+            RouteYamlExtractor.PayloadKind.AMBIGUOUS,
+            RouteYamlExtractor.classifyPayload(p, "SELECT 1")
         );
     }
 
@@ -89,16 +89,16 @@ class RouteExecutorRouteTest {
         // malformed payload; edge surfaces a clear error.
         java.util.Map<String, Object> p = new java.util.HashMap<>();
         assertEquals(
-            RouteExecutorRoute.PayloadKind.MISSING,
-            RouteExecutorRoute.classifyPayload(p, null)
+            RouteYamlExtractor.PayloadKind.MISSING,
+            RouteYamlExtractor.classifyPayload(p, null)
         );
         assertEquals(
-            RouteExecutorRoute.PayloadKind.MISSING,
-            RouteExecutorRoute.classifyPayload(p, "")
+            RouteYamlExtractor.PayloadKind.MISSING,
+            RouteYamlExtractor.classifyPayload(p, "")
         );
         assertEquals(
-            RouteExecutorRoute.PayloadKind.MISSING,
-            RouteExecutorRoute.classifyPayload(null, null)
+            RouteYamlExtractor.PayloadKind.MISSING,
+            RouteYamlExtractor.classifyPayload(null, null)
         );
     }
 
@@ -332,12 +332,12 @@ class RouteExecutorRouteTest {
         java.util.Map<String, Object> p = new java.util.HashMap<>();
         p.put("operation", "   ");
         assertEquals(
-            RouteExecutorRoute.PayloadKind.MISSING,
-            RouteExecutorRoute.classifyPayload(p, null)
+            RouteYamlExtractor.PayloadKind.MISSING,
+            RouteYamlExtractor.classifyPayload(p, null)
         );
         assertEquals(
-            RouteExecutorRoute.PayloadKind.LEGACY,
-            RouteExecutorRoute.classifyPayload(p, "SELECT 1")
+            RouteYamlExtractor.PayloadKind.LEGACY,
+            RouteYamlExtractor.classifyPayload(p, "SELECT 1")
         );
     }
 }
