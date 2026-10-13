@@ -1,5 +1,11 @@
 # metafore-edge changelog
 
+## Unreleased (development, v2) — MQTT sign-in: the edge never connects anonymously
+
+- **Add `mqtt/MqttSecurity` and `mqtt/ReloadingSslSocketFactory`** (Compass 9a26adcd, adr-059). The edge signs in to the broker with its client certificate (`METAFORE_MQTT_TLS_ENABLED`, `_CA_CERT`, `_CERT`, `_KEY`: PEM files, normally mounted at `/etc/metafore/mqtt`) and sends **no username and no password**: the broker maps the certificate's common name, which must be `<TENANT_ID>/<CONTROLLER_ID>`, to the username its topic rules key on. The pair is read again at every connect, so a certificate the platform renews on disk is used without a restart; a pair caught mid-rotation keeps the last one that loaded. PKCS#8, SEC1 and PKCS#1 keys load (bcpkix).
+- **Without a certificate**, `METAFORE_MQTT_USERNAME` (exactly `<TENANT_ID>/<CONTROLLER_ID>`) and `METAFORE_MQTT_PASSWORD` are required. **An edge with neither does not start** (before, it connected anonymously). `METAFORE_MQTT_TLS_INSECURE` is refused.
+- `AccessController` registers one `paho` component with these settings; every route's endpoint inherits them. No route URI changed.
+
 ## 1.1.0 — 2026-05-16 — Phase 14.9 edge topology advertisement
 
 - **Add `EdgeRuntime` enum** (`docker | native | docker-host-network | unknown`) classifying the surrounding process topology. Wire form is kebab-case (matches `contracts/mqtt/registration.schema.json` enum).

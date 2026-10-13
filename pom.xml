@@ -77,6 +77,13 @@
       <version>2.17.2</version>
     </dependency>
 
+    <!-- PEM private keys in every form cert-manager and openssl write (PKCS#8, SEC1 "EC PRIVATE KEY", PKCS#1) for the
+         MQTT client certificate (mqtt/MqttSecurity). The tests also build throw-away certificates with it. -->
+    <dependency>
+      <groupId>org.bouncycastle</groupId>
+      <artifactId>bcpkix-jdk18on</artifactId>
+      <version>1.78.1</version>
+    </dependency>
     <!-- Database -->
     <dependency>
       <groupId>org.postgresql</groupId>
