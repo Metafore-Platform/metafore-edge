@@ -3,7 +3,7 @@
 ## Unreleased (development, v2) — more source databases, part 1: types, dialects, pools
 
 - **Add `db/DbType`, `db/Dialect`, `db/DataSources`** (Compass 0e4dda60, adr-059). A command's `db_type` (`postgresql` default, `mysql`, `mariadb`, `mssql`/`sqlserver`, `oracle`) picks the JDBC driver (MariaDB Connector/J for both MySQL and MariaDB, mssql-jdbc, ojdbc11), the default port and the dialect's SQL fragments (quoting, page limit, case-insensitive contains, count alias; the Go agent's `dialect.go` is the reference). Timeouts match the Postgres pool; the password is never in the URL.
-- **`DataSourceRegistry`** registers a pool per type; the type is part of the fingerprint, and a non-Postgres key carries it (`conn:mysql:...`) while a Postgres key is unchanged. **`RouteExecutorRoute`** reads `db_type` and answers an unknown one with an error result `Unsupported db_type: <name> (expected ...)`. Operations still run Postgres SQL until part 2's next PR.
+- **`DataSourceRegistry`** registers a pool per type; the type is part of the fingerprint, and a non-Postgres key carries it (`conn:mysql:...`) while a Postgres key is unchanged. **`RouteExecutorRoute`** reads `db_type` and answers an unknown one with an error result `Unsupported db_type: <name> (expected ...)`. Operations still run Postgres SQL until part 2's next PR. Until then **`db/DialectGate`** refuses every operation and `connect_and_ping` for a non-Postgres `db_type` with `dialect not yet supported for <operation> (db_type <x>)` (`error_details: dialect_not_supported`), so Postgres SQL never runs against another kind of server; each later PR lets one operation through per dialect.
 
 ## Unreleased (development, v2) — per-edge reply topic
 

@@ -1,6 +1,7 @@
 package com.metafore.edge.route;
 
 import com.metafore.edge.db.DbType;
+import com.metafore.edge.db.DialectGate;
 import com.metafore.edge.db.DbType.UnsupportedDbTypeException;
 import com.metafore.edge.config.EdgeConfig;
 import com.metafore.edge.message.MessageFactory;
@@ -301,14 +302,18 @@ public class RouteExecutorRoute extends RouteBuilder {
     private Map<String, Object> executeParametric(
         String routeId, Map<String, Object> params
     ) {
+        String operation = (String) params.get("operation");
+        String refused = DialectGate.refusal(params, operation);
+        if (refused != null) {
+            return MessageFactory.routeResult(config, routeId, "error", "execute", 0,
+                null, null, null, refused, DialectGate.REFUSAL);
+        }
         DataSource ds = dsRegistry.get(dataSourceKey(params, routeId));
         if (ds == null) {
             return MessageFactory.routeResult(config, routeId,
                 "error", "execute", 0, null, null, null,
                 "No database connection available", null);
         }
-
-        String operation = (String) params.get("operation");
 
         // ADR-016 F1.T2b — "read" op has a richer payload shape
         // (pattern + filter_column + filter_value / filter_values +
@@ -543,6 +548,11 @@ public class RouteExecutorRoute extends RouteBuilder {
         Map<String, Object> params = (Map<String, Object>)
             cmd.getOrDefault("parameters", Collections.emptyMap());
 
+        String refused = DialectGate.refusal(params, "connect_and_ping");
+        if (refused != null) {
+            return MessageFactory.routeResult(config, routeId, "error", "connect_and_ping", 0,
+                null, null, null, refused, DialectGate.REFUSAL);
+        }
         String dbHost = str(params, "db_host", "DB_HOST", "");
         String dbPort = str(params, "db_port", "DB_PORT", "5432");
         String dbName = str(params, "db_name", "DB_NAME", "");
