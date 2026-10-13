@@ -87,6 +87,12 @@ class ReplyTopicRoutesTest extends CamelTestSupport {
             mock(r[1] + "-reply").assertIsSatisfied(5000);
             assertEquals(mock(r[1] + "-result").getExchanges().get(0).getIn().getBody(String.class),
                 mock(r[1] + "-reply").getExchanges().get(0).getIn().getBody(String.class), "the same result on both topics");
+            // the reply goes out through a fixed endpoint with the topic as a header, never as part of an endpoint URI
+            assertEquals(OWN, mock(r[1] + "-reply").getExchanges().get(0).getIn()
+                .getHeader(org.apache.camel.component.paho.PahoConstants.CAMEL_PAHO_OVERRIDE_TOPIC));
+            assertNull(mock(r[1] + "-result").getExchanges().get(0).getIn()
+                .getHeader(org.apache.camel.component.paho.PahoConstants.CAMEL_PAHO_OVERRIDE_TOPIC),
+                "the telemetry publish is not redirected");
         }
     }
 
@@ -97,6 +103,10 @@ class ReplyTopicRoutesTest extends CamelTestSupport {
         "\"response/other/acme-managed/a-1\"",
         "\"response/acme/acme-managed/#\"",              // a wildcard
         "\"response/acme/acme-managed/+\"",
+        "\"response/acme/acme-managed/a-1?brokerUrl=tcp://evil:1883\"",   // would be endpoint options in a built URI
+        "\"response/acme/acme-managed/a-1&brokerUrl=tcp://evil:1883\"",
+        "\"response/acme/acme-managed/a%3FbrokerUrl=x\"",
+        "\"response/acme/acme-managed/a 1\"",
         "\"telemetry/acme/acme-managed/route-results\"", // not a reply topic
         "123",                                           // not a string
         "null",
@@ -134,5 +144,19 @@ class ReplyTopicRoutesTest extends CamelTestSupport {
         String json = mock("rest-adapter-acme-reply").getExchanges().get(0).getIn().getBody(String.class);
         assertTrue(json.contains("\"action_id\":\"a-1\"") && json.contains("\"status\":\"error\""), json);
         assertTrue(json.contains("\"tenant_id\":\"acme\"") && json.contains("\"controller_id\":\"acme-managed\""), json);
+    }
+
+    @Test
+    void noRouteBuildsAnEndpointUriFromACommand() throws Exception {
+        // a dynamic endpoint (toD / recipientList / enrich) would read options out of whatever a command put in the
+        // topic; the reply goes through a fixed endpoint with the topic as a header (PahoConstants.CAMEL_PAHO_OVERRIDE_TOPIC)
+        try (var files = java.nio.file.Files.list(java.nio.file.Path.of("src", "main", "java", "com", "metafore", "edge", "route"))) {
+            for (java.nio.file.Path file : files.filter(f -> f.toString().endsWith(".java")).toList()) {
+                String code = java.nio.file.Files.readString(file);
+                for (String forbidden : new String[] {".toD(", ".recipientList(", ".enrich(", ".pollEnrich("}) {
+                    assertFalse(code.contains(forbidden), file.getFileName() + " uses " + forbidden);
+                }
+            }
+        }
     }
 }

@@ -11,6 +11,7 @@ import com.metafore.edge.service.SqlExecutor;
 import com.metafore.edge.topic.ReplyTopic;
 import com.metafore.edge.topic.TopicBuilder;
 import org.apache.camel.builder.RouteBuilder;
+import org.apache.camel.component.paho.PahoConstants;
 
 import javax.sql.DataSource;
 import java.util.*;
@@ -93,8 +94,9 @@ public class RouteExecutorRoute extends RouteBuilder {
                 + "?brokerUrl=" + config.brokerUrl()).id("route-result-publish")
             .choice()
                 .when(exchangeProperty("mfReplyTopic").isNotNull())
-                    .toD("paho:${exchangeProperty.mfReplyTopic}"
-                        + "?brokerUrl=" + config.brokerUrl()).id("route-reply-publish")
+                    // the topic goes in as a header on a FIXED endpoint, never into an endpoint URI built from the command
+                    .setHeader(PahoConstants.CAMEL_PAHO_OVERRIDE_TOPIC, exchangeProperty("mfReplyTopic"))
+                    .to("paho:" + topics.responsePrefix() + "reply?brokerUrl=" + config.brokerUrl()).id("route-reply-publish")
             .end()
             .log("Route result published");
     }

@@ -6,6 +6,7 @@ import com.metafore.edge.service.DiscoveryService;
 import com.metafore.edge.topic.ReplyTopic;
 import com.metafore.edge.topic.TopicBuilder;
 import org.apache.camel.builder.RouteBuilder;
+import org.apache.camel.component.paho.PahoConstants;
 
 import java.util.Collections;
 import java.util.Map;
@@ -67,9 +68,7 @@ public class DiscoveryRoute extends RouteBuilder {
                 // v2: only this edge's own per-edge topic, response/<tenant>/<controller>/<id> (topic/ReplyTopic);
                 // the retired shared response/<id>, another edge's topic and anything malformed are not answered on.
                 String responseTopic = ReplyTopic.forEdge(cmd.get("response_topic"), topics);
-                if (responseTopic != null) {
-                    exchange.getIn().setHeader("mfResponseTopic", responseTopic);
-                }
+                exchange.setProperty("mfReplyTopic", responseTopic);
                 Map<String, Object> capabilities =
                     DiscoveryService.execute(config.controllerId(), scope);
                 exchange.getIn().setBody(MessageFactory.discoveryResult(
@@ -84,9 +83,10 @@ public class DiscoveryRoute extends RouteBuilder {
             // response_topic so core's discover_and_wait
             // (response/{correlation_id}) resolves instead of timing out.
             .choice()
-                .when(header("mfResponseTopic").isNotNull())
-                    .toD("paho:${header.mfResponseTopic}"
-                        + "?brokerUrl=" + config.brokerUrl()).id("discovery-reply-publish")
+                .when(exchangeProperty("mfReplyTopic").isNotNull())
+                    // the topic goes in as a header on a FIXED endpoint, never into an endpoint URI built from the command
+                    .setHeader(PahoConstants.CAMEL_PAHO_OVERRIDE_TOPIC, exchangeProperty("mfReplyTopic"))
+                    .to("paho:" + topics.responsePrefix() + "reply?brokerUrl=" + config.brokerUrl()).id("discovery-reply-publish")
             .end()
             .log("Discovery results published");
     }
