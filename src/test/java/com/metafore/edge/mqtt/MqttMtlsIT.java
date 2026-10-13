@@ -246,4 +246,39 @@ class MqttMtlsIT {
         connect(second, factory);
         assertEquals("acme/other-managed", clientRow(second).get("username").asText(), "the new file was read at this connect");
     }
+
+    // ── the reply topic, through the real producer ──
+
+    @Test
+    void aReplyPublishedThroughTheFixedEndpointWithTheOverrideHeaderLandsOnThatTopicOnly() throws Exception {
+        MqttClient platform = connect(id("platform"),
+            new ReloadingSslSocketFactory(file("ca.crt"), file("platform.crt"), file("platform.key")));
+        List<String> seen = new CopyOnWriteArrayList<>();
+        CountDownLatch first = collect(platform, "response/#", seen);
+
+        Map<String, String> env = Map.of("METAFORE_MQTT_TLS_ENABLED", "true", "METAFORE_MQTT_TLS_CA_CERT", file("ca.crt").toString(),
+            "METAFORE_MQTT_TLS_CERT", file("edge.crt").toString(), "METAFORE_MQTT_TLS_KEY", file("edge.key").toString());
+        org.apache.camel.CamelContext context = new org.apache.camel.impl.DefaultCamelContext();
+        context.addComponent("paho", MqttSecurity.fromEnv(env, broker, "acme", "acme-managed").component());
+        // the production wiring of RouteExecutorRoute / RestAdapterRoute / DiscoveryRoute: a fixed endpoint, the topic as a header
+        context.addRoutes(new org.apache.camel.builder.RouteBuilder() {
+            @Override
+            public void configure() {
+                from("direct:reply")
+                    .setHeader(org.apache.camel.component.paho.PahoConstants.CAMEL_PAHO_OVERRIDE_TOPIC, header("target"))
+                    .to("paho:response/acme/acme-managed/reply?brokerUrl=" + broker);
+            }
+        });
+        context.start();
+        try {
+            org.apache.camel.ProducerTemplate template = context.createProducerTemplate();
+            template.sendBodyAndHeader("direct:reply", "{\"status\":\"success\"}", "target", "response/acme/acme-managed/a-9");
+            assertTrue(first.await(10, TimeUnit.SECONDS), "the platform should receive the reply");
+            Thread.sleep(1000);
+            assertEquals(List.of("response/acme/acme-managed/a-9"), seen,
+                "the reply lands on the topic the header names, not on the endpoint's own topic");
+        } finally {
+            context.stop();
+        }
+    }
 }
