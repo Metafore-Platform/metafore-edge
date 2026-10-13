@@ -6,8 +6,18 @@
   "type": "object",
   "required": ["action", "route_id"],
   "properties": {
-    "action": { "type": "string", "enum": ["deploy", "execute", "remove"] },
+    "action": { "type": "string", "enum": ["deploy", "execute", "remove", "run_template"] },
     "route_id": { "type": "string" },
+    "template_id": { "type": "string", "description": "Registered template id (run_template only)" },
+    "connection": {
+      "type": "object",
+      "description": "FHIR server connection — required for run_template; a misconfigured edge must not fall back to a public server.",
+      "properties": {
+        "base_url": { "type": "string", "description": "FHIR base URL (e.g. https://hapi.fhir.org/baseR4)" }
+      },
+      "required": ["base_url"],
+      "additionalProperties": false
+    },
     "route_yaml": { "type": "string", "description": "YAML route definition (for deploy)" },
     "parameters": {
       "type": "object",
@@ -54,5 +64,17 @@
     },
     "response_topic": { "type": "string", "description": "MQTT topic to publish result to" }
   },
+  "allOf": [
+    {
+      "if": { "properties": { "action": { "const": "run_template" } }, "required": ["action"] },
+      "then": {
+        "required": ["template_id", "connection"],
+        "properties": {
+          "template_id": { "minLength": 1 },
+          "connection": { "required": ["base_url"] }
+        }
+      }
+    }
+  ],
   "additionalProperties": false
 }

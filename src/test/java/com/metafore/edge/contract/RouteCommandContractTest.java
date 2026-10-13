@@ -98,6 +98,14 @@ class RouteCommandContractTest {
         "{\"action\":\"execute\",\"route_id\":\"r-1\",\"parameters\":{\"mcp_server_url\":\"https://m\",\"mcp_tool\":\"t\","
             + "\"mcp_arguments\":{\"k\":1},\"mcp_transport\":\"sse\"}}",
         "{\"action\":\"remove\",\"route_id\":\"r-1\"}",
+        // task 828b1be6 — run_template (FHIR): template_id + connection.base_url present
+        "{\"action\":\"run_template\",\"route_id\":\"r-1\","
+            + "\"template_id\":\"fhir.patient.read\","
+            + "\"connection\":{\"base_url\":\"https://hapi.fhir.org/baseR4\"}}",
+        "{\"action\":\"run_template\",\"route_id\":\"r-1\","
+            + "\"template_id\":\"fhir.patient.search\","
+            + "\"connection\":{\"base_url\":\"https://hapi.fhir.org/baseR4\"},"
+            + "\"parameters\":{\"family\":\"Smith\"}}",
     })
     void whatThePlatformSendsIsAccepted(String command) throws Exception {
         assertEquals(Set.of(), check(COMMAND, command));
@@ -121,6 +129,14 @@ class RouteCommandContractTest {
             + "\"introspect\":\"columns\",\"schema_name\":\"s\"}}",                           // columns needs table_name
         "{\"action\":\"execute\",\"route_id\":\"r-1\",\"parameters\":{\"operation\":\"introspect\","
             + "\"introspect\":\"tables\"}}",                                                   // tables needs schema_name
+        // task 828b1be6 — run_template: missing template_id, missing connection, extra field in connection
+        "{\"action\":\"run_template\",\"route_id\":\"r-1\","
+            + "\"connection\":{\"base_url\":\"https://hapi.fhir.org/baseR4\"}}",             // template_id required
+        "{\"action\":\"run_template\",\"route_id\":\"r-1\","
+            + "\"template_id\":\"fhir.patient.read\"}",                                      // connection required
+        "{\"action\":\"run_template\",\"route_id\":\"r-1\","
+            + "\"template_id\":\"fhir.patient.read\","
+            + "\"connection\":{\"base_url\":\"https://hapi.fhir.org/baseR4\",\"extra\":1}}", // additionalProperties false
     })
     void whatTheSchemaRefusesIsRefused(String command) throws Exception {
         assertFalse(check(COMMAND, command).isEmpty(), "the pinned schema should refuse: " + command);
@@ -131,7 +147,7 @@ class RouteCommandContractTest {
         JsonNode enumNode = MAPPER.readTree(resource(COMMAND)).at("/properties/action/enum");
         Set<String> actions = new java.util.TreeSet<>();
         enumNode.forEach(n -> actions.add(n.asText()));
-        assertEquals(Set.of("deploy", "execute", "remove"), actions,
+        assertEquals(Set.of("deploy", "execute", "remove", "run_template"), actions,
             "the platform's route actions changed: the edge's RouteExecutorRoute must handle each new one");
     }
 
