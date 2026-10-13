@@ -6,5 +6,10 @@
   "capabilities": ["jdbc", "shell"],
   "db_type": "mariadb",
   "db_host": "localhost",
-  "db_port": 3306
+  "db_port": 3306,
+  "templates": [
+    {"id": "fhir.patient.read",   "version": "1"},
+    {"id": "fhir.patient.search", "version": "1"},
+    {"id": "fhir.server.metadata","version": "1"}
+  ]
 }
