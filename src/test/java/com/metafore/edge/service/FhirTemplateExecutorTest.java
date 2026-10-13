@@ -201,7 +201,8 @@ class FhirTemplateExecutorTest {
             "fhir.patient.read", CONNECTION, Map.of("patient_id", "example"));
 
         assertEquals("success", result.get("status"));
-        assertEquals("fhir.patient.read", result.get("action"));
+        assertEquals("run_template", result.get("action"));
+        assertEquals("fhir.patient.read", result.get("template_id"));
         assertEquals(1, result.get("row_count"));
     }
 
@@ -218,6 +219,8 @@ class FhirTemplateExecutorTest {
             "fhir.patient.search", CONNECTION, Map.of("family", "Smith"));
 
         assertEquals("success", result.get("status"));
+        assertEquals("run_template", result.get("action"));
+        assertEquals("fhir.patient.search", result.get("template_id"));
         assertEquals(1, result.get("row_count"));
     }
 
@@ -234,7 +237,8 @@ class FhirTemplateExecutorTest {
             "fhir.server.metadata", CONNECTION, Map.of());
 
         assertEquals("success", result.get("status"));
-        assertEquals("fhir.server.metadata", result.get("action"));
+        assertEquals("run_template", result.get("action"));
+        assertEquals("fhir.server.metadata", result.get("template_id"));
         assertEquals(1, result.get("row_count"));
 
         // URI must be {base_url}/metadata

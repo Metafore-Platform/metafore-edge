@@ -254,11 +254,11 @@ public final class FhirTemplateExecutor {
 
     @SuppressWarnings("unchecked")
     private Map<String, Object> wrapResponse(
-        long start, HttpResponse<String> resp, String action
+        long start, HttpResponse<String> resp, String templateId
     ) throws IOException {
         long latency = System.currentTimeMillis() - start;
         if (resp.statusCode() < 200 || resp.statusCode() >= 300) {
-            return err(start, action, "fhir_http_error",
+            return err(start, templateId, "fhir_http_error",
                 "FHIR server returned HTTP " + resp.statusCode()
                 + ": " + truncate(resp.body()));
         }
@@ -276,18 +276,20 @@ public final class FhirTemplateExecutor {
         }
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("status", "success");
-        out.put("action", action);
+        out.put("action", "run_template");
+        out.put("template_id", templateId);
         out.put("latency_ms", latency);
         out.put("row_count", data.size());
         out.put("data", data);
         return out;
     }
 
-    private Map<String, Object> err(long start, String action, String error, String details) {
+    private Map<String, Object> err(long start, String templateId, String error, String details) {
         long latency = System.currentTimeMillis() - start;
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("status", "error");
-        out.put("action", action);
+        out.put("action", "run_template");
+        out.put("template_id", templateId);
         out.put("latency_ms", latency);
         out.put("error", error);
         out.put("error_details", details);

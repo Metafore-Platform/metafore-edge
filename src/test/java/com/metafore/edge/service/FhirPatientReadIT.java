@@ -34,7 +34,8 @@ class FhirPatientReadIT {
 
         assertEquals("success", result.get("status"),
             "HAPI fhir.patient.read must succeed: " + result.get("error_details"));
-        assertEquals("fhir.patient.read", result.get("action"));
+        assertEquals("run_template", result.get("action"));
+        assertEquals("fhir.patient.read", result.get("template_id"));
         assertTrue(((Number) result.get("row_count")).intValue() >= 1,
             "row_count must be at least 1");
 

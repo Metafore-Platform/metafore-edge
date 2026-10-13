@@ -12,7 +12,7 @@ sha="${1:?usage: scripts/sync-contracts.sh <metafore-api commit sha>}"
 [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "the commit must be a full 40-character sha" >&2; exit 2; }
 dir="$(cd "$(dirname "$0")/.." && pwd)/src/test/resources/schemas"
 repo="Metafore-Platform/metafore-api"
-files=(route_command.schema.json route_result.schema.json)
+files=(route_command.schema.json route_result.schema.json registration.schema.json)
 for f in "${files[@]}"; do
   gh api -H "Accept: application/vnd.github.raw" "repos/$repo/contents/packages/contracts/mqtt/$f?ref=$sha" > "$dir/$f"
 done
