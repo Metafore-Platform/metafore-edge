@@ -15,7 +15,9 @@ final class DialectStatements {
 
     private DialectStatements() { }
 
-    static String table(Dialect d, ParsedTableName parsed) {
+    static String table(Dialect dialect, ParsedTableName parsed) {
+        // a table is already the catalog's spelling; an Oracle column mapping must never rename it
+        Dialect d = dialect.type() == com.metafore.edge.db.DbType.ORACLE ? Dialect.ORACLE : dialect;
         return parsed.schemaWasExplicit ? d.quote(parsed.schema) + "." + d.quote(parsed.table) : d.quote(parsed.table);
     }
 

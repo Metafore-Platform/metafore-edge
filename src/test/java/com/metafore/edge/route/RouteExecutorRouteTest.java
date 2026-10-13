@@ -350,7 +350,7 @@ class RouteExecutorRouteTest {
             params.put("db_name", "d");
             params.put("db_user", "u");
             params.put("db_pass", "p");
-            params.put("operation", "read");
+            params.put("operation", "write_with_events");
             params.put("table_name", "t");
             Map<String, Object> cmd = new HashMap<>();
             cmd.put("parameters", params);
@@ -358,7 +358,7 @@ class RouteExecutorRouteTest {
             @SuppressWarnings("unchecked")
             Map<String, Object> result = (Map<String, Object>) execute.invoke(route, "r1", cmd);
             assertEquals("error", result.get("status"), type);
-            assertEquals("dialect not yet supported for read (db_type " + type + ")", result.get("error"));
+            assertEquals("dialect not yet supported for write_with_events (db_type " + type + ")", result.get("error"));
             assertEquals("dialect_not_supported", result.get("error_details"));
 
             @SuppressWarnings("unchecked")
@@ -370,10 +370,10 @@ class RouteExecutorRouteTest {
     @Test
     void parametricOperationsPassTheGateOnlyForTypesProvenLive() {
         for (String type : new String[] {"mysql", "mariadb"}) {
-            for (String op : new String[] {"create", "update", "delete", "select"}) {
+            for (String op : new String[] {"create", "update", "delete", "select", "read"}) {
                 assertNull(com.metafore.edge.db.DialectGate.refusal(Map.of("db_type", type), op), type + " " + op);
             }
-            for (String op : new String[] {"read", "write_with_events", "introspect"}) {
+            for (String op : new String[] {"write_with_events", "introspect"}) {
                 assertNotNull(com.metafore.edge.db.DialectGate.refusal(Map.of("db_type", type), op), type + " " + op);
             }
         }

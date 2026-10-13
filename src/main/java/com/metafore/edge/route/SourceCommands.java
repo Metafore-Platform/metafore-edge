@@ -126,6 +126,13 @@ final class SourceCommands {
             : DialectExecutor.executeParametric(type, ds, operation, tableName, columns, values, whereColumn, whereValue);
     }
 
+    /** The {@code read} patterns in the source's own dialect (Postgres keeps {@link SqlExecutor}'s path). */
+    static Map<String, Object> executeRead(Map<String, Object> params, javax.sql.DataSource ds) {
+        DbType type = DbType.of(str(params, "db_type", "DB_TYPE", ""));
+        return type == DbType.POSTGRESQL ? SqlExecutor.executeParametricRead(ds, params)
+            : DialectExecutor.executeRead(type, ds, params);
+    }
+
     private static String str(Map<String, Object> params, String key1, String key2, String def) {
         Object v = params.get(key1);
         if (v == null) v = params.get(key2);
