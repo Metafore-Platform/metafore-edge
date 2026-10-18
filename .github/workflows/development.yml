@@ -150,18 +150,41 @@ jobs:
         if: always()
         run: scripts/mtls-broker.sh stop
 
-  # The image builds (no push, no credentials): a Dockerfile that stopped building shows on the pull request, not on the publish.
+  # The image builds (no push): a Dockerfile that stopped building shows on the pull request, not on the publish.
+  # Base images come from this account's ECR pull-through cache of public.ecr.aws through a PULL-ONLY role
+  # (CI_PULL_ROLE_ARN, metafore-infra terraform/dev), because public.ecr.aws answers an anonymous runner "429 Data limit
+  # exceeded" now and then. While the variable is unset, and for a pull request from a fork (no token), it pulls from
+  # public.ecr.aws as before. The guard holds this job to that: it may sign in as that role and nothing else.
   image:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      USE_CACHE: ${{ vars.CI_PULL_ROLE_ARN != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     steps:
       - uses: actions/checkout@v4
-      # The base images come from public.ecr.aws, which answers an anonymous runner "429 Data limit exceeded" now and then
-      # (seen on this job's first run; the second passed). Try three times before failing.
+      - if: env.USE_CACHE == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.CI_PULL_ROLE_ARN }}
+          aws-region: us-east-1
+      - if: env.USE_CACHE == 'true'
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Choose the base image registry
+        run: |
+          if [ "$USE_CACHE" = "true" ]; then
+            echo "BASE_REGISTRY=${{ steps.ecr.outputs.registry }}/ecr-public" >> "$GITHUB_ENV"
+          else
+            echo "BASE_REGISTRY=public.ecr.aws" >> "$GITHUB_ENV"
+          fi
+      # Three tries: the public registry (the fallback) throttles anonymous pulls.
       - name: Build the image
         run: |
           for attempt in 1 2 3; do
-            docker build --build-arg EDGE_VERSION="${{ github.sha }}" -t metafore-edge:ci . && break
+            docker build --build-arg BASE_REGISTRY="$BASE_REGISTRY" --build-arg EDGE_VERSION="${{ github.sha }}" -t metafore-edge:ci . && break
             [ "$attempt" = 3 ] && exit 1
             echo "::warning::the image did not build (attempt $attempt); trying again"; sleep $((attempt * 45))
           done
@@ -201,13 +224,24 @@ jobs:
 
       - uses: aws-actions/amazon-ecr-login@v2
 
+      # Base images from the pull-through cache once the pull-only role exists (CI_PULL_ROLE_ARN set); this role may pull them too.
+      - name: Choose the base image registry
+        env:
+          CACHE_READY: ${{ vars.CI_PULL_ROLE_ARN != '' }}
+        run: |
+          if [ "$CACHE_READY" = "true" ]; then
+            echo "BASE_REGISTRY=${REGISTRY%/*}/ecr-public" >> "$GITHUB_ENV"
+          else
+            echo "BASE_REGISTRY=public.ecr.aws" >> "$GITHUB_ENV"
+          fi
+
       - name: Build and push the commit's image (once; tags are immutable)
         run: |
           if aws ecr describe-images --repository-name metafore-dev/edge --image-ids imageTag="$SHA" >/dev/null 2>&1; then
             echo "metafore-dev/edge:$SHA already built"
           else
             for attempt in 1 2 3; do   # public.ecr.aws throttles anonymous pulls now and then
-              docker build --build-arg EDGE_VERSION="$SHA" \
+              docker build --build-arg BASE_REGISTRY="$BASE_REGISTRY" --build-arg EDGE_VERSION="$SHA" \
                 --label org.opencontainers.image.revision="$SHA" \
                 --label org.opencontainers.image.source="https://github.com/$GITHUB_REPOSITORY" \
                 -t "$REGISTRY/edge:$SHA" . && break

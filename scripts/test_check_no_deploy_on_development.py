@@ -169,6 +169,51 @@ class GuardTest(unittest.TestCase):
     def test_a_publish_job_in_another_workflow_is_a_deploy(self):
         self.assertTrue(run(development_yml=OWN_OK, publish_yml=OWN_PUBLISH.replace("name: development", "name: p")))
 
+    # ── the one pull-only job: `image` builds from this account's ECR pull-through cache (Compass a3990b6e) ─────────────────
+
+    IMAGE_JOB = """  image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.CI_PULL_ROLE_ARN }}
+      - uses: aws-actions/amazon-ecr-login@v2
+      - run: docker build --build-arg BASE_REGISTRY="$BASE" -t metafore-edge:ci .
+"""
+
+    def with_image(self, image: str | None = None) -> str:
+        text = OWN_PUBLISH.replace("  publish:", (image or self.IMAGE_JOB) + "  publish:", 1)
+        return text.replace("needs: [test]", "needs: [test, image]")
+
+    def test_the_image_job_may_take_the_pull_only_role(self):
+        self.assertEqual([], run(development_yml=self.with_image()))
+
+    def test_the_image_job_cannot_push_or_publish_or_reach_a_cluster(self):
+        for bad in ("      - run: docker push x/y:z\n", "      - run: docker buildx build --push .\n",
+                    "      - run: aws ecr put-image --repository-name a\n", "      - run: kubectl get pods\n",
+                    "      - run: helm list\n", "      - uses: docker/login-action@v3\n",
+                    "      - run: echo metafore-dev/edge\n", "      - run: echo ${{ vars.EDGE_PUBLISH_ROLE_ARN }}\n"):
+            with self.subTest(step=bad):
+                self.assertTrue(run(development_yml=self.with_image(self.IMAGE_JOB + bad)), bad)
+
+    def test_the_image_job_asks_for_the_token_and_read_access_only_and_no_environment(self):
+        for extra in ("      packages: write\n", "      contents: write\n"):
+            text = self.with_image(self.IMAGE_JOB.replace("      id-token: write\n", "      id-token: write\n" + extra))
+            self.assertTrue(any("job image" in p and "permissions" in p for p in run(development_yml=text)), extra)
+        text = self.with_image(self.IMAGE_JOB.replace("    permissions:", "    environment: development\n    permissions:"))
+        self.assertTrue(any("job image" in p and "environment" in p for p in run(development_yml=text)))
+
+    def test_the_image_job_uses_the_pull_role_and_no_other(self):
+        text = self.with_image(self.IMAGE_JOB.replace("vars.CI_PULL_ROLE_ARN", "vars.SOME_OTHER_ROLE_ARN"))
+        self.assertTrue(any("job image" in p and "CI_PULL_ROLE_ARN" in p for p in run(development_yml=text)))
+
+    def test_the_publish_job_waits_for_the_image_job(self):
+        text = self.with_image().replace("needs: [test, image]", "needs: [test]")
+        self.assertTrue(any("needs" in p for p in run(development_yml=text)))
+
     def test_globs_follow_github_rules(self):
         self.assertTrue(guard._matches(["dev*"], "development"))
         self.assertFalse(guard._matches(["eng/**"], "development"))
