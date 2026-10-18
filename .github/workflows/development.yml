@@ -192,6 +192,15 @@ jobs:
         run: |
           docker run --rm --entrypoint sh metafore-edge:ci -c 'test -s /app/app.jar && echo "EDGE_VERSION=$EDGE_VERSION"' | tee /tmp/v
           grep -q "EDGE_VERSION=${{ github.sha }}" /tmp/v
+      # The edge runs as 65532 on a read-only root filesystem (the chart's securityContext, Compass f2ad23ca): it must boot and
+      # reach its broker without writing anywhere. The broker here is unreachable on purpose; the run must stop on THAT, not on the disk.
+      - name: It runs as a non-root user on a read-only root filesystem
+        run: |
+          test "$(docker run --rm --entrypoint id metafore-edge:ci -u)" = 65532
+          docker run --rm --read-only -e TENANT_ID=t -e CONTROLLER_ID=c -e BROKER_URL=tcp://127.0.0.1:1 \
+            -e METAFORE_MQTT_USERNAME=t/c -e METAFORE_MQTT_PASSWORD=x metafore-edge:ci > /tmp/ro.log 2>&1 || true
+          grep -q "Unable to connect to server" /tmp/ro.log
+          ! grep -iE "read-only file system|permission denied|accessdenied|no such file" /tmp/ro.log
 
   # The commit's image, built once and tagged with the commit (tags are immutable in ECR). The job runs only when every job above
   # passed (`needs`), only for a push to development, and only once an admin has set EDGE_PUBLISH_ENABLED and the role the

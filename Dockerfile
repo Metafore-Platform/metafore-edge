@@ -17,6 +17,11 @@ RUN apk add --no-cache procps
 WORKDIR /app
 COPY --from=build /build/target/metafore-edge-1.0.0-jar-with-dependencies.jar app.jar
 
+# Not root. The edge writes nothing to its own filesystem (measured: it runs 40 s against a broker from a read-only working
+# directory with no temp directory and creates no file; a file-feed route's directory is the one exception, and a mounted
+# volume's). 65532 is the "nonroot" id the chart's other pods use. -XX:-UsePerfData: no /tmp/hsperfdata file.
+USER 65532:65532
+
 # The commit this image was built from (CI passes it); the edge reports it as its version.
 ARG EDGE_VERSION=1.0.0
 ENV CONTROLLER_ID=edge-default \
@@ -24,4 +29,4 @@ ENV CONTROLLER_ID=edge-default \
     BROKER_URL=tcp://mqtt-broker:1883 \
     EDGE_VERSION=${EDGE_VERSION}
 
-CMD ["java", "-jar", "app.jar"]
+CMD ["java", "-XX:-UsePerfData", "-jar", "app.jar"]
