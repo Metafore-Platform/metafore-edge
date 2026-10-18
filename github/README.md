@@ -15,9 +15,25 @@ once. Nothing publishes until step 3 sets `EDGE_PUBLISH_ENABLED`, and nothing is
    JSON
    gh api -X POST repos/Metafore-Platform/metafore-edge/environments/development/deployment-branch-policies -f name=development
    ```
-3. **Variables** (repository): `EDGE_PUBLISH_ROLE_ARN` (the role of step 1), `EDGE_PUBLISH_ENABLED=true`. For the pin, later:
-   `DEPLOY_APP_ID` and `EDGE_PIN_ENABLED=true`, and the **environment secret** `DEPLOY_APP_PRIVATE_KEY` (GitHub App
-   `metafore-dev-deploy`, installed on `metafore-deploy`, the same key core and web use).
+3. **Variables and secret.** Repository variables (metafore-infra #49 made the role; its ARN is the output `edge_publish_role_arn`):
+
+   ```
+   gh variable set EDGE_PUBLISH_ROLE_ARN --repo Metafore-Platform/metafore-edge --body arn:aws:iam::359469026479:role/github-actions-metafore-dev-edge-publish
+   gh variable set EDGE_PUBLISH_ENABLED  --repo Metafore-Platform/metafore-edge --body true
+   ```
+
+   The pin (later, with the broker sign-in, Compass f2ad23ca) needs the GitHub App `metafore-dev-deploy` (id 5088348):
+
+   ```
+   gh variable set DEPLOY_APP_ID --repo Metafore-Platform/metafore-edge --body 5088348
+   gh secret set DEPLOY_APP_PRIVATE_KEY --env development --repo Metafore-Platform/metafore-edge < path/to/the-app-private-key.pem
+   gh variable set EDGE_PIN_ENABLED --repo Metafore-Platform/metafore-edge --body true
+   ```
+
+   The key is an **environment** secret, not the organisation's `DEPLOY_APP_PRIVATE_KEY`: this repository is public and a workflow on any
+   branch of it can read an organisation or repository secret, while an environment secret goes only to jobs running in the
+   `development` environment, which accepts the `development` branch only (step 2). Do not add this repository to the
+   organisation secret's selected repositories.
 4. **Ruleset**: the required checks of `development` (`github/development-ruleset.json`):
 
    ```
