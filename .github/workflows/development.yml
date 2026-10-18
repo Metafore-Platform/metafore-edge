@@ -1,8 +1,13 @@
 name: development
 
-# The v2 branch. It builds and tests; it does not publish or roll out anything. main, staging and eng/** have their own
-# workflows (ci.yml, eng-branch-deploy.yml) and none of them fires for this branch; the first job below fails the build if
-# that stops being true. Read-only token, no secrets, no cloud login.
+# The v2 branch. It builds and tests, and on a push it publishes the commit's image; it rolls nothing out. main, staging and
+# eng/** have their own workflows (ci.yml, eng-branch-deploy.yml) and none of them fires for this branch; the first job below
+# fails the build if that stops being true. Every job but `publish` has a read-only token, no secrets and no cloud login.
+#
+# `publish` (Compass a3990b6e) is the only job that may hold credentials, and scripts/check_no_deploy_on_development.py holds
+# it to that: a push to development only, after every other job passed, in the `development` environment, with the OIDC token
+# and read access only, pushing to the one ECR repository metafore-dev/edge and (when EDGE_PIN_ENABLED) committing the pin to
+# Metafore-Platform/metafore-deploy. It holds no cluster credential: Argo CD rolls out what metafore-deploy pins.
 on:
   push:
     branches: [development]
@@ -72,6 +77,7 @@ jobs:
   dialects:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    name: dialects (${{ matrix.name }})
     strategy:
       fail-fast: false
       matrix:
@@ -141,3 +147,122 @@ jobs:
       - name: Stop the broker
         if: always()
         run: scripts/mtls-broker.sh stop
+
+  # The image builds (no push, no credentials): a Dockerfile that stopped building shows on the pull request, not on the publish.
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      # The base images come from public.ecr.aws, which answers an anonymous runner "429 Data limit exceeded" now and then
+      # (seen on this job's first run; the second passed). Try three times before failing.
+      - name: Build the image
+        run: |
+          for attempt in 1 2 3; do
+            docker build --build-arg EDGE_VERSION="${{ github.sha }}" -t metafore-edge:ci . && break
+            [ "$attempt" = 3 ] && exit 1
+            echo "::warning::the image did not build (attempt $attempt); trying again"; sleep $((attempt * 45))
+          done
+      - name: The jar is in it and the version is the commit
+        run: |
+          docker run --rm --entrypoint sh metafore-edge:ci -c 'test -s /app/app.jar && echo "EDGE_VERSION=$EDGE_VERSION"' | tee /tmp/v
+          grep -q "EDGE_VERSION=${{ github.sha }}" /tmp/v
+
+  # The commit's image, built once and tagged with the commit (tags are immutable in ECR). The job runs only when every job above
+  # passed (`needs`), only for a push to development, and only once an admin has set EDGE_PUBLISH_ENABLED and the role the
+  # token may assume (metafore-infra terraform/dev: github-actions-metafore-dev-edge-publish, ECR push on metafore-dev/edge only).
+  publish:
+    needs: [guard, test, fhir-it, dialects, mtls, image]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/development' && vars.EDGE_PUBLISH_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: development
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: publish-development
+      cancel-in-progress: false
+    env:
+      AWS_REGION: us-east-1
+      REGISTRY: 359469026479.dkr.ecr.us-east-1.amazonaws.com/metafore-dev
+      SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SHA }}
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.EDGE_PUBLISH_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push the commit's image (once; tags are immutable)
+        run: |
+          if aws ecr describe-images --repository-name metafore-dev/edge --image-ids imageTag="$SHA" >/dev/null 2>&1; then
+            echo "metafore-dev/edge:$SHA already built"
+          else
+            for attempt in 1 2 3; do   # public.ecr.aws throttles anonymous pulls now and then
+              docker build --build-arg EDGE_VERSION="$SHA" \
+                --label org.opencontainers.image.revision="$SHA" \
+                --label org.opencontainers.image.source="https://github.com/$GITHUB_REPOSITORY" \
+                -t "$REGISTRY/edge:$SHA" . && break
+              [ "$attempt" = 3 ] && exit 1
+              sleep $((attempt * 45))
+            done
+            docker push "$REGISTRY/edge:$SHA"
+          fi
+
+      # The digest makes the pin exact: metafore-deploy accepts only <tag>@sha256:<digest> (tools/check_pins.py).
+      - name: Digest of the image
+        run: |
+          DIGEST=$(aws ecr describe-images --repository-name metafore-dev/edge --image-ids imageTag="$SHA" \
+            --query 'imageDetails[0].imageDigest' --output text)
+          echo "DIGEST=$DIGEST" >> "$GITHUB_ENV"
+          echo "### Image \`metafore-dev/edge:$SHA@$DIGEST\`" >> "$GITHUB_STEP_SUMMARY"
+
+      # The pin is a commit by the GitHub App metafore-dev-deploy (installed on metafore-deploy only), which changes the edge's
+      # tag and nothing else (tools/set_pin.py there). Off until EDGE_PIN_ENABLED is 'true': the dev edge stays on its current
+      # image until its broker sign-in is in place (Compass f2ad23ca).
+      - uses: actions/create-github-app-token@v2
+        if: vars.EDGE_PIN_ENABLED == 'true'
+        id: app
+        with:
+          app-id: ${{ vars.DEPLOY_APP_ID }}
+          private-key: ${{ secrets.DEPLOY_APP_PRIVATE_KEY }}
+          owner: Metafore-Platform
+          repositories: metafore-deploy
+
+      - uses: actions/checkout@v4
+        if: vars.EDGE_PIN_ENABLED == 'true'
+        with:
+          repository: Metafore-Platform/metafore-deploy
+          ref: development
+          token: ${{ steps.app.outputs.token }}
+          path: metafore-deploy
+
+      - name: Pin this commit in metafore-deploy
+        if: vars.EDGE_PIN_ENABLED == 'true'
+        working-directory: metafore-deploy
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
+        run: |
+          uid=$(gh api "/users/${APP_SLUG}[bot]" --jq .id)
+          git config user.name "${APP_SLUG}[bot]"
+          git config user.email "${uid}+${APP_SLUG}[bot]@users.noreply.github.com"
+          for attempt in 1 2 3 4 5; do
+            git fetch -q origin development && git reset -q --hard origin/development
+            python3 tools/set_pin.py --env dev --component edge --tag "$SHA@$DIGEST" \
+              --source "Metafore-Platform/metafore-edge ${SHA::8} (development)"
+            if git diff --quiet; then echo "dev already pins ${SHA::8}"; exit 0; fi
+            python3 tools/check_pins.py && bash tools/isolation_guard.sh
+            git commit -qam "dev: edge ${SHA::8}" -m "https://github.com/${GITHUB_REPOSITORY}/commit/${SHA}"
+            if git push -q origin HEAD:development; then
+              echo "### Pinned in metafore-deploy: $(git rev-parse --short HEAD)" >> "$GITHUB_STEP_SUMMARY"; exit 0
+            fi
+            sleep $((attempt * 5))
+          done
+          echo "::error::could not push the pin to metafore-deploy"; exit 1
