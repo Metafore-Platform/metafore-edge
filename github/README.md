@@ -22,6 +22,16 @@ once. Nothing publishes until step 3 sets `EDGE_PUBLISH_ENABLED`, and nothing is
    gh variable set EDGE_PUBLISH_ENABLED  --repo Metafore-Platform/metafore-edge --body true
    ```
 
+   Base images come from this account's ECR pull-through cache, because public.ecr.aws answers an anonymous runner "429 Data
+   limit exceeded" now and then. After metafore-infra's `terraform/dev` change that adds `metafore-edge` to the pull-only role is
+   applied (not before: the build would fail on a registry that is not there yet), set:
+
+   ```
+   gh variable set CI_PULL_ROLE_ARN --repo Metafore-Platform/metafore-edge --body arn:aws:iam::359469026479:role/github-actions-metafore-dev-ci-pull
+   ```
+
+   While it is unset the builds pull from public.ecr.aws as before.
+
    The pin (later, with the broker sign-in, Compass f2ad23ca) needs the GitHub App `metafore-dev-deploy` (id 5088348):
 
    ```
