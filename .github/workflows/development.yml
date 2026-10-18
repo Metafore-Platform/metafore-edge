@@ -154,8 +154,15 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      # The base images come from public.ecr.aws, which answers an anonymous runner "429 Data limit exceeded" now and then
+      # (seen on this job's first run; the second passed). Try three times before failing.
       - name: Build the image
-        run: docker build --build-arg EDGE_VERSION="${{ github.sha }}" -t metafore-edge:ci .
+        run: |
+          for attempt in 1 2 3; do
+            docker build --build-arg EDGE_VERSION="${{ github.sha }}" -t metafore-edge:ci . && break
+            [ "$attempt" = 3 ] && exit 1
+            echo "::warning::the image did not build (attempt $attempt); trying again"; sleep $((attempt * 45))
+          done
       - name: The jar is in it and the version is the commit
         run: |
           docker run --rm --entrypoint sh metafore-edge:ci -c 'test -s /app/app.jar && echo "EDGE_VERSION=$EDGE_VERSION"' | tee /tmp/v
@@ -197,10 +204,14 @@ jobs:
           if aws ecr describe-images --repository-name metafore-dev/edge --image-ids imageTag="$SHA" >/dev/null 2>&1; then
             echo "metafore-dev/edge:$SHA already built"
           else
-            docker build --build-arg EDGE_VERSION="$SHA" \
-              --label org.opencontainers.image.revision="$SHA" \
-              --label org.opencontainers.image.source="https://github.com/$GITHUB_REPOSITORY" \
-              -t "$REGISTRY/edge:$SHA" .
+            for attempt in 1 2 3; do   # public.ecr.aws throttles anonymous pulls now and then
+              docker build --build-arg EDGE_VERSION="$SHA" \
+                --label org.opencontainers.image.revision="$SHA" \
+                --label org.opencontainers.image.source="https://github.com/$GITHUB_REPOSITORY" \
+                -t "$REGISTRY/edge:$SHA" . && break
+              [ "$attempt" = 3 ] && exit 1
+              sleep $((attempt * 45))
+            done
             docker push "$REGISTRY/edge:$SHA"
           fi
 
