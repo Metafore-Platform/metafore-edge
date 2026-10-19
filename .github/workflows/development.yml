@@ -1,8 +1,13 @@
 name: development
 
-# The v2 branch. It builds and tests; it does not publish or roll out anything. main, staging and eng/** have their own
-# workflows (ci.yml, eng-branch-deploy.yml) and none of them fires for this branch; the first job below fails the build if
-# that stops being true. Read-only token, no secrets, no cloud login.
+# The v2 branch. It builds and tests, and on a push it publishes the commit's image; it rolls nothing out. main, staging and
+# eng/** have their own workflows (ci.yml, eng-branch-deploy.yml) and none of them fires for this branch; the first job below
+# fails the build if that stops being true. Every job but `publish` has a read-only token, no secrets and no cloud login.
+#
+# `publish` (Compass a3990b6e) is the only job that may hold credentials, and scripts/check_no_deploy_on_development.py holds
+# it to that: a push to development only, after every other job passed, in the `development` environment, with the OIDC token
+# and read access only, pushing to the one ECR repository metafore-dev/edge and (when EDGE_PIN_ENABLED) committing the pin to
+# Metafore-Platform/metafore-deploy. It holds no cluster credential: Argo CD rolls out what metafore-deploy pins.
 on:
   push:
     branches: [development]
@@ -28,6 +33,8 @@ jobs:
         run: python -m pip install pyyaml
       - name: No workflow that can run for development may deploy
         run: python scripts/check_no_deploy_on_development.py
+      - name: All workflows reference Metafore-Platform repos only
+        run: python scripts/check_no_personal_repos.py
       - name: The guard's own tests
         run: python -m unittest discover -s scripts -p 'test_*.py' -v
 
@@ -67,6 +74,53 @@ jobs:
           grep -q "Tests run: [1-9]" target/failsafe-reports/*FhirPatientReadIT.txt
           grep -q "Skipped: 0" target/failsafe-reports/*FhirPatientReadIT.txt
 
+  # The parametric operations against a real MySQL and a real MariaDB (DialectParametricIT). SQL Server and Oracle follow
+  # with their own jobs.
+  dialects:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    name: dialects (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: mysql, db_type: mysql, image: 'mysql:8.4' }
+          - { name: mariadb, db_type: mariadb, image: 'mariadb:11.4' }
+    services:
+      db:
+        image: ${{ matrix.image }}
+        env:
+          MYSQL_ROOT_PASSWORD: it-root
+          MYSQL_DATABASE: it
+        ports:
+          - 3306:3306
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+      - name: Wait for the server
+        run: |
+          for i in $(seq 1 60); do (echo > /dev/tcp/127.0.0.1/3306) 2>/dev/null && exit 0; sleep 2; done
+          echo "no server on 3306"; exit 1
+      - name: The dialect integration test
+        env:
+          IT_DB_TYPE: ${{ matrix.db_type }}
+          IT_DB_HOST: 127.0.0.1
+          IT_DB_PORT: '3306'
+          IT_DB_NAME: it
+          IT_DB_USER: root
+          IT_DB_PASS: it-root
+        run: mvn -B verify -Dtest=NONE -Dsurefire.failIfNoSpecifiedTests=false -Dit.test=DialectParametricIT
+      - name: It must have run, not been skipped
+        run: |
+          cat target/failsafe-reports/*DialectParametricIT.txt
+          grep -q "Tests run: [1-9]" target/failsafe-reports/*DialectParametricIT.txt
+          grep -q "Skipped: 0" target/failsafe-reports/*DialectParametricIT.txt
+
   # The real broker: the platform chart's own EMQX configuration, certificate listener and topic rules, with throw-away
   # certificates; the edge signs in to it with its certificate (scripts/mtls-broker.sh, MqttMtlsIT).
   mtls:
@@ -95,3 +149,165 @@ jobs:
       - name: Stop the broker
         if: always()
         run: scripts/mtls-broker.sh stop
+
+  # The image builds (no push): a Dockerfile that stopped building shows on the pull request, not on the publish.
+  # Base images come from this account's ECR pull-through cache of public.ecr.aws through a PULL-ONLY role
+  # (CI_PULL_ROLE_ARN, metafore-infra terraform/dev), because public.ecr.aws answers an anonymous runner "429 Data limit
+  # exceeded" now and then. While the variable is unset, and for a pull request from a fork (no token), it pulls from
+  # public.ecr.aws as before. The guard holds this job to that: it may sign in as that role and nothing else.
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      USE_CACHE: ${{ vars.CI_PULL_ROLE_ARN != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    steps:
+      - uses: actions/checkout@v4
+      - if: env.USE_CACHE == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.CI_PULL_ROLE_ARN }}
+          aws-region: us-east-1
+      - if: env.USE_CACHE == 'true'
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Choose the base image registry
+        run: |
+          if [ "$USE_CACHE" = "true" ]; then
+            echo "BASE_REGISTRY=${{ steps.ecr.outputs.registry }}/ecr-public" >> "$GITHUB_ENV"
+          else
+            echo "BASE_REGISTRY=public.ecr.aws" >> "$GITHUB_ENV"
+          fi
+      # Three tries: the public registry (the fallback) throttles anonymous pulls.
+      - name: Build the image
+        run: |
+          for attempt in 1 2 3; do
+            docker build --build-arg BASE_REGISTRY="$BASE_REGISTRY" --build-arg EDGE_VERSION="${{ github.sha }}" -t metafore-edge:ci . && break
+            [ "$attempt" = 3 ] && exit 1
+            echo "::warning::the image did not build (attempt $attempt); trying again"; sleep $((attempt * 45))
+          done
+      - name: The jar is in it and the version is the commit
+        run: |
+          docker run --rm --entrypoint sh metafore-edge:ci -c 'test -s /app/app.jar && echo "EDGE_VERSION=$EDGE_VERSION"' | tee /tmp/v
+          grep -q "EDGE_VERSION=${{ github.sha }}" /tmp/v
+      # The edge runs as 65532 on a read-only root filesystem (the chart's securityContext, Compass f2ad23ca): it must boot and
+      # reach its broker without writing anywhere. The broker here is unreachable on purpose; the run must stop on THAT, not on the disk.
+      - name: It runs as a non-root user on a read-only root filesystem
+        run: |
+          test "$(docker run --rm --entrypoint id metafore-edge:ci -u)" = 65532
+          docker run --rm --read-only -e TENANT_ID=t -e CONTROLLER_ID=c -e BROKER_URL=tcp://127.0.0.1:1 \
+            -e METAFORE_MQTT_USERNAME=t/c -e METAFORE_MQTT_PASSWORD=x metafore-edge:ci > /tmp/ro.log 2>&1 || true
+          grep -q "Unable to connect to server" /tmp/ro.log
+          ! grep -iE "read-only file system|permission denied|accessdenied|no such file" /tmp/ro.log
+
+  # The commit's image, built once and tagged with the commit (tags are immutable in ECR). The job runs only when every job above
+  # passed (`needs`), only for a push to development, and only once an admin has set EDGE_PUBLISH_ENABLED and the role the
+  # token may assume (metafore-infra terraform/dev: github-actions-metafore-dev-edge-publish, ECR push on metafore-dev/edge only).
+  publish:
+    needs: [guard, test, fhir-it, dialects, mtls, image]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/development' && vars.EDGE_PUBLISH_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: development
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: publish-development
+      cancel-in-progress: false
+    env:
+      AWS_REGION: us-east-1
+      REGISTRY: 359469026479.dkr.ecr.us-east-1.amazonaws.com/metafore-dev
+      SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SHA }}
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.EDGE_PUBLISH_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+
+      # Base images from the pull-through cache once the pull-only role exists (CI_PULL_ROLE_ARN set); this role may pull them too.
+      - name: Choose the base image registry
+        env:
+          CACHE_READY: ${{ vars.CI_PULL_ROLE_ARN != '' }}
+        run: |
+          if [ "$CACHE_READY" = "true" ]; then
+            echo "BASE_REGISTRY=${REGISTRY%/*}/ecr-public" >> "$GITHUB_ENV"
+          else
+            echo "BASE_REGISTRY=public.ecr.aws" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build and push the commit's image (once; tags are immutable)
+        run: |
+          if aws ecr describe-images --repository-name metafore-dev/edge --image-ids imageTag="$SHA" >/dev/null 2>&1; then
+            echo "metafore-dev/edge:$SHA already built"
+          else
+            for attempt in 1 2 3; do   # public.ecr.aws throttles anonymous pulls now and then
+              docker build --build-arg BASE_REGISTRY="$BASE_REGISTRY" --build-arg EDGE_VERSION="$SHA" \
+                --label org.opencontainers.image.revision="$SHA" \
+                --label org.opencontainers.image.source="https://github.com/$GITHUB_REPOSITORY" \
+                -t "$REGISTRY/edge:$SHA" . && break
+              [ "$attempt" = 3 ] && exit 1
+              sleep $((attempt * 45))
+            done
+            docker push "$REGISTRY/edge:$SHA"
+          fi
+
+      # The digest makes the pin exact: metafore-deploy accepts only <tag>@sha256:<digest> (tools/check_pins.py).
+      - name: Digest of the image
+        run: |
+          DIGEST=$(aws ecr describe-images --repository-name metafore-dev/edge --image-ids imageTag="$SHA" \
+            --query 'imageDetails[0].imageDigest' --output text)
+          echo "DIGEST=$DIGEST" >> "$GITHUB_ENV"
+          echo "### Image \`metafore-dev/edge:$SHA@$DIGEST\`" >> "$GITHUB_STEP_SUMMARY"
+
+      # The pin is a commit by the GitHub App metafore-dev-deploy (installed on metafore-deploy only), which changes the edge's
+      # tag and nothing else (tools/set_pin.py there). Off until EDGE_PIN_ENABLED is 'true': the dev edge stays on its current
+      # image until its broker sign-in is in place (Compass f2ad23ca).
+      - uses: actions/create-github-app-token@v2
+        if: vars.EDGE_PIN_ENABLED == 'true'
+        id: app
+        with:
+          app-id: ${{ vars.DEPLOY_APP_ID }}
+          private-key: ${{ secrets.DEPLOY_APP_PRIVATE_KEY }}
+          owner: Metafore-Platform
+          repositories: metafore-deploy
+
+      - uses: actions/checkout@v4
+        if: vars.EDGE_PIN_ENABLED == 'true'
+        with:
+          repository: Metafore-Platform/metafore-deploy
+          ref: development
+          token: ${{ steps.app.outputs.token }}
+          path: metafore-deploy
+
+      - name: Pin this commit in metafore-deploy
+        if: vars.EDGE_PIN_ENABLED == 'true'
+        working-directory: metafore-deploy
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
+        run: |
+          uid=$(gh api "/users/${APP_SLUG}[bot]" --jq .id)
+          git config user.name "${APP_SLUG}[bot]"
+          git config user.email "${uid}+${APP_SLUG}[bot]@users.noreply.github.com"
+          for attempt in 1 2 3 4 5; do
+            git fetch -q origin development && git reset -q --hard origin/development
+            python3 tools/set_pin.py --env dev --component edge --tag "$SHA@$DIGEST" \
+              --source "Metafore-Platform/metafore-edge ${SHA::8} (development)"
+            if git diff --quiet; then echo "dev already pins ${SHA::8}"; exit 0; fi
+            python3 tools/check_pins.py && bash tools/isolation_guard.sh
+            git commit -qam "dev: edge ${SHA::8}" -m "https://github.com/${GITHUB_REPOSITORY}/commit/${SHA}"
+            if git push -q origin HEAD:development; then
+              echo "### Pinned in metafore-deploy: $(git rev-parse --short HEAD)" >> "$GITHUB_STEP_SUMMARY"; exit 0
+            fi
+            sleep $((attempt * 5))
+          done
+          echo "::error::could not push the pin to metafore-deploy"; exit 1

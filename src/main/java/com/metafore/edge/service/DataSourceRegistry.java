@@ -1,5 +1,7 @@
 package com.metafore.edge.service;
 
+import com.metafore.edge.db.DataSources;
+import com.metafore.edge.db.DbType;
 import org.apache.camel.CamelContext;
 import org.postgresql.ds.PGSimpleDataSource;
 import org.slf4j.Logger;
@@ -102,12 +104,39 @@ public final class DataSourceRegistry {
             + (user == null ? "" : user);
     }
 
+    /**
+     * {@link #connectionKey(String, String, String, String)} for a source of {@code type}. A Postgres source keeps exactly the
+     * key it always had (so a pool registered before v2 is still found); any other type is part of the key, because the same
+     * host, port, database and user can be a different server.
+     */
+    public static String connectionKey(DbType type, String host, String port, String dbName, String user) {
+        String base = connectionKey(host, port, dbName, user);
+        return type == null || type == DbType.POSTGRESQL ? base : "conn:" + type.wireName() + base.substring("conn".length());
+    }
+
     /** Is a pool already registered under this name? */
     public boolean has(String name) {
         return name != null && dataSources.containsKey(name);
     }
 
     public void register(String name, String host, String port,
+                         String dbName, String user, String password,
+                         int defaultRowFetchSize) {
+        register(DbType.POSTGRESQL, name, host, port, dbName, user, password, defaultRowFetchSize);
+    }
+
+    /** {@link #register(DbType, String, String, String, String, String, String, int)} with the default fetch size. */
+    public void register(DbType type, String name, String host, String port,
+                         String dbName, String user, String password) {
+        register(type, name, host, port, dbName, user, password, DEFAULT_ROW_FETCH_SIZE);
+    }
+
+    /**
+     * Register a DataSource for a source of {@code type}. Postgres is built exactly as before; MySQL, MariaDB, SQL Server and
+     * Oracle by {@link DataSources} (v2). The type is part of the fingerprint: a name re-pointed at another kind of server
+     * replaces its pool.
+     */
+    public void register(DbType type, String name, String host, String port,
                          String dbName, String user, String password,
                          int defaultRowFetchSize) {
         // IDEMPOTENT ON AN IDENTICAL REGISTRATION, and only that. Re-registering
@@ -121,10 +150,22 @@ public final class DataSourceRegistry {
         // credential, has to take effect rather than keep serving the stale
         // pool. That guarantee is older than this fix and is what
         // DataSourceRegistryExternalSourceTest pins.
-        String fingerprint = fingerprint(host, port, dbName, user, password,
+        String fingerprint = fingerprint(type, host, port, dbName, user, password,
                                          defaultRowFetchSize);
         if (fingerprint.equals(fingerprints.get(name))
             && dataSources.containsKey(name)) {
+            return;
+        }
+        if (type != null && type != DbType.POSTGRESQL) {
+            try {
+                DataSource other = DataSources.create(type, host, port, dbName, user, password);
+                dataSources.put(name, other);
+                fingerprints.put(name, fingerprint);
+                camelContext.getRegistry().bind(name, other);
+                LOG.info("DataSource registered: {} -> {}", name, DataSources.url(type, host, port, dbName));
+            } catch (Exception e) {
+                LOG.warn("Failed to register {} DataSource {}: {}", type.wireName(), name, e.getMessage());
+            }
             return;
         }
         try {
@@ -153,7 +194,7 @@ public final class DataSourceRegistry {
             String url = "jdbc:postgresql://" + host + ":" + port
                 + (dbName != null && !dbName.isEmpty() ? "/" + dbName : "");
             dataSources.put(name, ds);
-            fingerprints.put(name, fingerprint(host, port, dbName, user, password,
+            fingerprints.put(name, fingerprint(type, host, port, dbName, user, password,
                                                effectiveFetchSize));
             camelContext.getRegistry().bind(name, ds);
             LOG.info("DataSource registered: {} -> {} (defaultRowFetchSize={})",
@@ -179,9 +220,10 @@ public final class DataSourceRegistry {
         return dataSources.size();
     }
 
-    private static String fingerprint(String host, String port, String dbName,
+    private static String fingerprint(DbType type, String host, String port, String dbName,
                                       String user, String password, int fetchSize) {
         return String.join("|#|",
+            type == null ? "postgresql" : type.wireName(),
             String.valueOf(host), String.valueOf(port), String.valueOf(dbName),
             String.valueOf(user), String.valueOf(password),
             String.valueOf(fetchSize));
