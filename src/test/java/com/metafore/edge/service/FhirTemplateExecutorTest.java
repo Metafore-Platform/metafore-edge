@@ -64,6 +64,7 @@ class FhirTemplateExecutorTest {
     void allowedTemplatesAreKnown() {
         assertTrue(FhirTemplateExecutor.ALLOWED_TEMPLATES.contains("fhir.patient.read"));
         assertTrue(FhirTemplateExecutor.ALLOWED_TEMPLATES.contains("fhir.patient.search"));
+        assertTrue(FhirTemplateExecutor.ALLOWED_TEMPLATES.contains("fhir.server.metadata"));
     }
 
     // ── connection.base_url guard ─────────────────────────────────────
@@ -200,7 +201,8 @@ class FhirTemplateExecutorTest {
             "fhir.patient.read", CONNECTION, Map.of("patient_id", "example"));
 
         assertEquals("success", result.get("status"));
-        assertEquals("fhir.patient.read", result.get("action"));
+        assertEquals("run_template", result.get("action"));
+        assertEquals("fhir.patient.read", result.get("template_id"));
         assertEquals(1, result.get("row_count"));
     }
 
@@ -217,6 +219,32 @@ class FhirTemplateExecutorTest {
             "fhir.patient.search", CONNECTION, Map.of("family", "Smith"));
 
         assertEquals("success", result.get("status"));
+        assertEquals("run_template", result.get("action"));
+        assertEquals("fhir.patient.search", result.get("template_id"));
         assertEquals(1, result.get("row_count"));
+    }
+
+    @Test
+    void serverMetadataSuccessWrapsCapabilityStatement() throws Exception {
+        HttpResponse<String> fakeResp = fakeResponse(200,
+            "{\"resourceType\":\"CapabilityStatement\",\"fhirVersion\":\"4.0.1\","
+            + "\"status\":\"active\",\"kind\":\"instance\"}");
+        FhirHttpSend mockSender = mock(FhirHttpSend.class);
+        when(mockSender.send(any(HttpRequest.class))).thenReturn(fakeResp);
+
+        FhirTemplateExecutor executor = new FhirTemplateExecutor(mockSender);
+        Map<String, Object> result = executor.execute(
+            "fhir.server.metadata", CONNECTION, Map.of());
+
+        assertEquals("success", result.get("status"));
+        assertEquals("run_template", result.get("action"));
+        assertEquals("fhir.server.metadata", result.get("template_id"));
+        assertEquals(1, result.get("row_count"));
+
+        // URI must be {base_url}/metadata
+        var captor = org.mockito.ArgumentCaptor.forClass(HttpRequest.class);
+        verify(mockSender).send(captor.capture());
+        assertTrue(captor.getValue().uri().toString().endsWith("/metadata"),
+            "URI must end with /metadata: " + captor.getValue().uri());
     }
 }

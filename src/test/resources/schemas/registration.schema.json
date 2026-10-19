@@ -12,29 +12,39 @@
     "version": { "type": "string", "description": "Access Controller software version" },
     "capabilities": {
       "type": "array",
-      "items": { "type": "string", "enum": ["jdbc", "http", "shell"] },
-      "description": "Route types this controller can execute"
+      "items": {
+        "type": "string",
+        "enum": ["heartbeat", "registration", "events", "read", "write", "test_connection", "introspect",
+                 "healthcheck", "ddl", "shell", "mcp", "jdbc", "http", "run_template", "fhir"]
+      },
+      "description": "What this controller advertises. The Go edge sends heartbeat, registration, events, read, write, test_connection; the Java edge sends shell, test_connection, healthcheck, introspect, read, write, ddl, mcp; jdbc and http are the original route types. Core stores the list as given and gates nothing on it."
+    },
+    "templates": {
+      "type": "array",
+      "description": "adr-060 — the certified route templates compiled into this edge, which run_template can run. Core refuses to save a Connection whose adapter needs a template the edge does not advertise (template_not_certified). OPTIONAL; an edge that omits it advertises none.",
+      "items": {
+        "type": "object",
+        "required": ["id"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*){2}$" },
+          "version": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
     },
     "db_type": { "type": "string", "enum": ["mariadb", "mysql", "postgresql", "oracle", "mssql", "none"] },
     "db_host": { "type": "string" },
     "db_port": { "type": "integer" },
     "db_name": { "type": "string", "description": "Database name on this controller" },
-    "tenants": {
-      "type": "array",
-      "items": { "type": "string", "minLength": 1 },
-      "minItems": 1,
-      "uniqueItems": true,
-      "description": "Phase 14.18 — Edge claims to serve these tenant slugs/IDs from one physical process. OPTIONAL; absence means legacy single-tenant mode."
-    },
     "runtime": {
       "type": "string",
-      "enum": ["docker", "native", "docker-host-network", "unknown"],
-      "description": "Phase 14.9 — Edge process topology, auto-detected at startup; informs mount-time host validation. OPTIONAL field; absence is treated as 'unknown' by metafore-core."
+      "enum": ["docker", "native", "docker-host-network", "kubernetes", "unknown"],
+      "description": "Phase 14.9 — Edge process topology, auto-detected at startup; informs mount-time host validation. OPTIONAL field; absence is treated as 'unknown' by metafore-core. Edge clients prior to 1.1.0 omit this field. 'kubernetes' is what the platform's own chart and edge manifest set (EDGE_RUNTIME)."
     },
     "runtime_hints": {
       "type": "object",
       "additionalProperties": true,
-      "description": "Phase 14.9 — Free-form diagnostic context backing the runtime classification."
+      "description": "Phase 14.9 — Free-form diagnostic context backing the runtime classification (os_name, java_version, hostname, docker_env_file_present, cgroup_signature). OPTIONAL; for operator diagnostics only — not consumed by any deterministic logic."
     }
   },
   "additionalProperties": false
