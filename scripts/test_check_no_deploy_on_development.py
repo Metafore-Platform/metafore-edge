@@ -20,6 +20,40 @@ jobs:
 """
 DEPLOY_STEP = "      - run: kubectl set image deployment/x x=y\n"
 
+#: development.yml with the one job that may publish (Compass a3990b6e): after every other job, on a push to development only,
+#: in the development environment, with the OIDC token and nothing else, to the one ECR repository `metafore-dev/edge`.
+OWN_PUBLISH = """
+name: development
+on:
+  push:
+    branches: [development]
+  pull_request:
+    branches: [development]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: mvn package -B
+  publish:
+    needs: [test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/development'
+    runs-on: ubuntu-latest
+    environment: development
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      REGISTRY: 359469026479.dkr.ecr.us-east-1.amazonaws.com/metafore-dev
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/amazon-ecr-login@v2
+      - run: |
+          aws ecr describe-images --repository-name metafore-dev/edge --image-ids imageTag="$SHA"
+          docker push "$REGISTRY/edge:$SHA"
+"""
+
 
 def wf(on_block: str, steps: str = "      - run: echo hi\n") -> str:
     return "name: w\n" + textwrap.dedent(on_block) + "jobs:\n  j:\n    runs-on: ubuntu-latest\n    steps:\n" + steps
@@ -79,6 +113,106 @@ class GuardTest(unittest.TestCase):
         self.assertTrue(any("only `contents: read`" in p for p in run(development_yml=write)))
         job_write = OWN_OK.replace("    runs-on: ubuntu-latest\n", "    runs-on: ubuntu-latest\n    permissions:\n      id-token: write\n")
         self.assertTrue(run(development_yml=job_write))
+
+    # ── the one job that may publish (Compass a3990b6e) ─────────────────────────────────────────────────────────────────────
+
+    def test_the_named_publish_job_may_hold_credentials_and_push(self):
+        self.assertEqual([], run(development_yml=OWN_PUBLISH))
+
+    def test_a_publish_job_is_still_not_allowed_to_reach_a_cluster_or_another_registry(self):
+        for bad in ("      - run: kubectl rollout restart deployment/x\n", "      - run: helm upgrade a b\n",
+                    "      - run: argocd app sync a\n", "      - uses: docker/login-action@v3\n",
+                    "      - run: docker push ghcr.io/x/y:z\n", "      - run: docker push \"$REGISTRY/api:$SHA\"\n",
+                    "      - run: aws ecr describe-images --repository-name metafore-dev/api\n",
+                    "      - run: docker push 359469026479.dkr.ecr.us-east-1.amazonaws.com/metafore-ilan/metafore-edge:latest\n",
+                    "      - run: aws eks update-kubeconfig --name metafore-staging\n"):
+            with self.subTest(step=bad):
+                self.assertTrue(run(development_yml=OWN_PUBLISH + bad), bad)
+
+    def test_the_publish_job_runs_on_a_push_to_development_and_nothing_else(self):
+        for cond in ("github.event_name == 'push'", "github.ref == 'refs/heads/development'", "true"):
+            with self.subTest(cond=cond):
+                text = OWN_PUBLISH.replace("github.event_name == 'push' && github.ref == 'refs/heads/development'", cond)
+                self.assertTrue(any("publish" in p and "push to development" in p for p in run(development_yml=text)))
+        no_if = OWN_PUBLISH.replace("    if: github.event_name == 'push' && github.ref == 'refs/heads/development'\n", "")
+        self.assertTrue(any("push to development" in p for p in run(development_yml=no_if)))
+
+    def test_the_publish_job_waits_for_every_other_job(self):
+        two = OWN_PUBLISH.replace("  publish:", "  lint:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo\n  publish:")
+        self.assertTrue(any("needs" in p for p in run(development_yml=two)))
+        self.assertEqual([], run(development_yml=two.replace("needs: [test]", "needs: [test, lint]")))
+        self.assertTrue(any("needs" in p for p in run(development_yml=OWN_PUBLISH.replace("    needs: [test]\n", ""))))
+
+    def test_the_publish_job_runs_in_the_development_environment(self):
+        for env in ("      environment: production\n", ""):
+            text = OWN_PUBLISH.replace("    environment: development\n", env and "    environment: production\n")
+            self.assertTrue(any("environment" in p for p in run(development_yml=text)), env)
+
+    def test_the_publish_job_asks_for_the_token_and_read_access_only(self):
+        for extra in ("      packages: write\n", "      contents: write\n", "      pull-requests: write\n"):
+            text = OWN_PUBLISH.replace("      id-token: write\n", "      id-token: write\n" + extra)
+            self.assertTrue(any("permissions" in p for p in run(development_yml=text)), extra)
+        self.assertTrue(run(development_yml=OWN_PUBLISH.replace("      contents: read\n      id-token: write\n", "")))
+
+    def test_no_other_job_of_development_yml_may_hold_credentials(self):
+        other = OWN_PUBLISH.replace("  publish:", "  sneaky:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: aws-actions/configure-aws-credentials@v4\n  publish:")
+        self.assertTrue(any("could deploy" in p for p in run(development_yml=other)))
+        token = OWN_PUBLISH.replace("  test:\n    runs-on: ubuntu-latest\n", "  test:\n    runs-on: ubuntu-latest\n    permissions:\n      id-token: write\n")
+        self.assertTrue(run(development_yml=token))
+
+    def test_development_yml_can_only_be_started_by_a_push_or_a_pull_request(self):
+        for extra in ("  workflow_dispatch:\n", "  schedule:\n    - cron: '0 3 * * *'\n", "  workflow_run:\n    workflows: [x]\n"):
+            text = OWN_PUBLISH.replace("permissions:\n  contents: read\njobs:", extra + "permissions:\n  contents: read\njobs:", 1)
+            with self.subTest(extra=extra):
+                self.assertTrue(any("can only be started by a push or a pull request" in p for p in run(development_yml=text)), extra)
+
+    def test_a_publish_job_in_another_workflow_is_a_deploy(self):
+        self.assertTrue(run(development_yml=OWN_OK, publish_yml=OWN_PUBLISH.replace("name: development", "name: p")))
+
+    # ── the one pull-only job: `image` builds from this account's ECR pull-through cache (Compass a3990b6e) ─────────────────
+
+    IMAGE_JOB = """  image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.CI_PULL_ROLE_ARN }}
+      - uses: aws-actions/amazon-ecr-login@v2
+      - run: docker build --build-arg BASE_REGISTRY="$BASE" -t metafore-edge:ci .
+"""
+
+    def with_image(self, image: str | None = None) -> str:
+        text = OWN_PUBLISH.replace("  publish:", (image or self.IMAGE_JOB) + "  publish:", 1)
+        return text.replace("needs: [test]", "needs: [test, image]")
+
+    def test_the_image_job_may_take_the_pull_only_role(self):
+        self.assertEqual([], run(development_yml=self.with_image()))
+
+    def test_the_image_job_cannot_push_or_publish_or_reach_a_cluster(self):
+        for bad in ("      - run: docker push x/y:z\n", "      - run: docker buildx build --push .\n",
+                    "      - run: aws ecr put-image --repository-name a\n", "      - run: kubectl get pods\n",
+                    "      - run: helm list\n", "      - uses: docker/login-action@v3\n",
+                    "      - run: echo metafore-dev/edge\n", "      - run: echo ${{ vars.EDGE_PUBLISH_ROLE_ARN }}\n"):
+            with self.subTest(step=bad):
+                self.assertTrue(run(development_yml=self.with_image(self.IMAGE_JOB + bad)), bad)
+
+    def test_the_image_job_asks_for_the_token_and_read_access_only_and_no_environment(self):
+        for extra in ("      packages: write\n", "      contents: write\n"):
+            text = self.with_image(self.IMAGE_JOB.replace("      id-token: write\n", "      id-token: write\n" + extra))
+            self.assertTrue(any("job image" in p and "permissions" in p for p in run(development_yml=text)), extra)
+        text = self.with_image(self.IMAGE_JOB.replace("    permissions:", "    environment: development\n    permissions:"))
+        self.assertTrue(any("job image" in p and "environment" in p for p in run(development_yml=text)))
+
+    def test_the_image_job_uses_the_pull_role_and_no_other(self):
+        text = self.with_image(self.IMAGE_JOB.replace("vars.CI_PULL_ROLE_ARN", "vars.SOME_OTHER_ROLE_ARN"))
+        self.assertTrue(any("job image" in p and "CI_PULL_ROLE_ARN" in p for p in run(development_yml=text)))
+
+    def test_the_publish_job_waits_for_the_image_job(self):
+        text = self.with_image().replace("needs: [test, image]", "needs: [test]")
+        self.assertTrue(any("needs" in p for p in run(development_yml=text)))
 
     def test_globs_follow_github_rules(self):
         self.assertTrue(guard._matches(["dev*"], "development"))
