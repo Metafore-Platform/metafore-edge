@@ -334,7 +334,7 @@ public class RouteExecutorRoute extends RouteBuilder {
         String routeId, DataSource ds, Map<String, Object> params
     ) {
         Map<String, Object> execResult =
-            SqlExecutor.executeParametricRead(ds, params);
+            SourceCommands.executeRead(params, ds);
         String status = (String) execResult.get("status");
         String action = (String) execResult.getOrDefault("action", "query");
         long latency = ((Number) execResult.get("latency_ms")).longValue();

@@ -63,11 +63,11 @@ class DialectParametricIT {
     private static String ddl() {
         return switch (type) {
             case MYSQL, MARIADB -> "CREATE TABLE it_items (id INT PRIMARY KEY, name VARCHAR(100), qty DECIMAL(10,2), "
-                + "created DATETIME(6), born DATE, flag TINYINT(1))";
+                + "created DATETIME(6), born DATE, flag TINYINT(1), grp INT, tombstoned_at DATETIME(6))";
             case MSSQL -> "CREATE TABLE it_items (id INT PRIMARY KEY, name NVARCHAR(100), qty DECIMAL(10,2), "
-                + "created DATETIME2, born DATE, flag BIT)";
+                + "created DATETIME2, born DATE, flag BIT, grp INT, tombstoned_at DATETIME2)";
             default -> "CREATE TABLE it_items (id NUMBER(10) PRIMARY KEY, name VARCHAR2(100), qty NUMBER(10,2), "
-                + "created TIMESTAMP, born DATE, flag NUMBER(1))";
+                + "created TIMESTAMP, born DATE, flag NUMBER(1), grp NUMBER(10), tombstoned_at TIMESTAMP)";
         };
     }
 
@@ -106,6 +106,90 @@ class DialectParametricIT {
         assertEquals(1, run("delete", List.of("name"), vals((Object) null), "id", 1).get("rows_affected"));
         assertNull(only(run("select", List.of("name"), null, "id", 1)).get("name"));
         assertEquals(0, run("select", List.of("name"), null, "id", 99).get("row_count"));
+    }
+
+    private static Map<String, Object> read(Map<String, Object> payload) {
+        Map<String, Object> p = new java.util.LinkedHashMap<>(payload);
+        p.put("operation", "read");
+        p.put("table_name", "it_items");
+        return DialectExecutor.executeRead(type, ds, p);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<String> names(Map<String, Object> result) {
+        assertEquals("success", result.get("status"), String.valueOf(result));
+        List<String> out = new ArrayList<>();
+        for (Map<String, Object> row : (List<Map<String, Object>>) result.get("data")) {
+            out.add(String.valueOf(row.get("name")));
+        }
+        return out;
+    }
+
+    @Test
+    void readPatterns() {
+        String[] names = {"alpha", "beta", "gamma", "delta", "epsilon"};
+        for (int i = 0; i < names.length; i++) {
+            // id 13 is tombstoned
+            assertEquals("success", run("create", List.of("id", "name", "grp", "tombstoned_at"),
+                vals(10 + i, names[i], 7, i == 3 ? "2026-01-01T00:00:00" : null), null, null).get("status"));
+        }
+        assertEquals(List.of("alpha"), names(read(Map.of("pattern", "by_id", "columns", List.of("name"),
+            "filter_column", "id", "filter_value", 10))));
+        assertEquals(2, names(read(Map.of("pattern", "by_ids", "columns", List.of("name"), "filter_column", "id",
+            "filter_values", List.of(10, 11, 99)))).size());
+        assertEquals(5, names(read(Map.of("pattern", "list", "columns", List.of("name"), "filter_column", "grp",
+            "filter_value", 7))).size());
+        assertEquals(4, names(read(Map.of("pattern", "list", "columns", List.of("name"), "filter_column", "grp",
+            "filter_value", 7, "exclude_tombstoned", true))).size());
+        assertEquals("5", read(Map.of("pattern", "count", "filter_column", "grp", "filter_value", 7)).get("data").toString()
+            .replaceAll("[^0-9]", ""));
+        Map<String, Object> grp7 = Map.of("pattern", "list", "columns", List.of("name"), "filter_column", "grp", "filter_value", 7);
+        assertEquals(List.of("beta"), names(read(with(grp7, "where_conditions",
+            List.of(Map.of("field", "name", "op", "contains", "value", "ET"))))), "contains is case-insensitive");
+        assertEquals(3, names(read(with(grp7, "where_conditions",
+            List.of(Map.of("field", "id", "op", "between", "value", List.of(11, 13)))))).size());
+        assertEquals(2, names(read(with(grp7, "where_conditions",
+            List.of(Map.of("field", "name", "op", "in", "value", List.of("alpha", "delta")))))).size());
+        assertEquals(1, names(read(with(grp7, "where_conditions",
+            List.of(Map.of("field", "tombstoned_at", "op", "is_not_null"))))).size());
+    }
+
+    private static Map<String, Object> with(Map<String, Object> base, String key, Object value) {
+        Map<String, Object> m = new java.util.LinkedHashMap<>(base);
+        m.put(key, value);
+        return m;
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void keysetPagesForwardWithoutGapsOrRepeats() {
+        for (int i = 0; i < 5; i++) {
+            run("create", List.of("id", "name", "grp"), vals(20 + i, "k" + i, 8), null, null);
+        }
+        Map<String, Object> base = Map.of("pattern", "list", "columns", List.of("name"), "filter_column", "grp",
+            "filter_value", 8, "keyset_field", "id", "limit", 2);
+        List<String> seen = new ArrayList<>();
+        Object cursor = null;
+        for (int page = 0; page < 3; page++) {
+            Map<String, Object> req = cursor == null ? base : with(base, "keyset_value", cursor);
+            Map<String, Object> r = read(req);
+            seen.addAll(names(r));
+            boolean more = (Boolean) r.get("has_more");
+            assertEquals(page < 2, more, "page " + page);
+            cursor = r.get("last_keyset_value");
+            if (!more) {
+                assertNull(cursor);
+            }
+        }
+        assertEquals(List.of("k0", "k1", "k2", "k3", "k4"), seen);
+    }
+
+    @Test
+    void aReadRefusalIsTheSameMessageAsPostgres() {
+        assertEquals("Unsupported read pattern: nope (expected by_id/by_ids/list/count)",
+            read(Map.of("pattern", "nope")).get("error"));
+        assertEquals("Column zzz does not exist on table it_items",
+            read(Map.of("pattern", "list", "columns", List.of("zzz"))).get("error"));
     }
 
     @Test
