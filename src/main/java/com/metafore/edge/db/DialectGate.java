@@ -14,7 +14,7 @@ public final class DialectGate {
     public static final String REFUSAL = "dialect_not_supported";
 
     /** The operations whose statements are built in the source's dialect (PR 2); every other one is Postgres-only for now. */
-    private static final Set<String> DIALECT_OPERATIONS = Set.of("create", "update", "delete", "select");
+    private static final Set<String> DIALECT_OPERATIONS = Set.of("create", "update", "delete", "select", "read");
 
     /** The types those operations are proven against a live server for (CI job {@code dialects}); SQL Server and Oracle wait for theirs. */
     private static final Set<DbType> LIVE = Set.of(DbType.POSTGRESQL, DbType.MYSQL, DbType.MARIADB);
