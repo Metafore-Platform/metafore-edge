@@ -21,10 +21,11 @@ import java.util.Set;
  * task 828b1be6 — FHIR template registry.
  *
  * <p>Executes registered FHIR read/search templates at the edge.
- * Two templates are supported:
+ * Three templates are supported:
  * <ul>
  *   <li>{@code fhir.patient.read} — GET {base_url}/Patient/{patient_id}</li>
  *   <li>{@code fhir.patient.search} — GET {base_url}/Patient?{whitelisted params}</li>
+ *   <li>{@code fhir.server.metadata} — GET {base_url}/metadata (CapabilityStatement)</li>
  * </ul>
  *
  * <p>Security invariants:
@@ -54,7 +55,8 @@ public final class FhirTemplateExecutor {
     /** Registered template ids this executor handles. */
     public static final Set<String> ALLOWED_TEMPLATES = Set.of(
         "fhir.patient.read",
-        "fhir.patient.search"
+        "fhir.patient.search",
+        "fhir.server.metadata"
     );
 
     /**
@@ -128,6 +130,8 @@ public final class FhirTemplateExecutor {
         try {
             if ("fhir.patient.read".equals(templateId)) {
                 return readPatient(start, baseUrl, safeParams);
+            } else if ("fhir.server.metadata".equals(templateId)) {
+                return readMetadata(start, baseUrl);
             } else {
                 return searchPatients(start, baseUrl, safeParams);
             }
@@ -210,6 +214,13 @@ public final class FhirTemplateExecutor {
         return wrapResponse(start, resp, "fhir.patient.read");
     }
 
+    private Map<String, Object> readMetadata(
+        long start, String baseUrl
+    ) throws IOException, InterruptedException {
+        HttpResponse<String> resp = get(baseUrl + "/metadata");
+        return wrapResponse(start, resp, "fhir.server.metadata");
+    }
+
     private Map<String, Object> searchPatients(
         long start, String baseUrl, Map<String, Object> params
     ) throws IOException, InterruptedException {
@@ -243,11 +254,11 @@ public final class FhirTemplateExecutor {
 
     @SuppressWarnings("unchecked")
     private Map<String, Object> wrapResponse(
-        long start, HttpResponse<String> resp, String action
+        long start, HttpResponse<String> resp, String templateId
     ) throws IOException {
         long latency = System.currentTimeMillis() - start;
         if (resp.statusCode() < 200 || resp.statusCode() >= 300) {
-            return err(start, action, "fhir_http_error",
+            return err(start, templateId, "fhir_http_error",
                 "FHIR server returned HTTP " + resp.statusCode()
                 + ": " + truncate(resp.body()));
         }
@@ -265,18 +276,20 @@ public final class FhirTemplateExecutor {
         }
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("status", "success");
-        out.put("action", action);
+        out.put("action", "run_template");
+        out.put("template_id", templateId);
         out.put("latency_ms", latency);
         out.put("row_count", data.size());
         out.put("data", data);
         return out;
     }
 
-    private Map<String, Object> err(long start, String action, String error, String details) {
+    private Map<String, Object> err(long start, String templateId, String error, String details) {
         long latency = System.currentTimeMillis() - start;
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("status", "error");
-        out.put("action", action);
+        out.put("action", "run_template");
+        out.put("template_id", templateId);
         out.put("latency_ms", latency);
         out.put("error", error);
         out.put("error_details", details);

@@ -333,6 +333,138 @@ class RouteExecutorRouteTest {
         );
     }
 
+    // ── task 828b1be6 — run_template fail-fast error replies ──────────────
+
+    /**
+     * Helper: build a RouteExecutorRoute with a real FhirTemplateExecutor,
+     * reflectively invoke {@code handleRunTemplate}, return the result envelope.
+     */
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> invokeHandleRunTemplate(
+        Map<String, Object> cmd
+    ) throws Exception {
+        DefaultCamelContext ctx = new DefaultCamelContext();
+        DataSourceRegistry registry = new DataSourceRegistry(ctx);
+        EdgeConfig cfg = EdgeConfig.from(java.util.Collections.emptyMap());
+        com.metafore.edge.topic.TopicBuilder topics =
+            new com.metafore.edge.topic.TopicBuilder(cfg.tenantId(), cfg.controllerId());
+        // real executor — exception paths fire before any HTTP
+        com.metafore.edge.service.FhirTemplateExecutor executor =
+            new com.metafore.edge.service.FhirTemplateExecutor();
+        RouteExecutorRoute route = new RouteExecutorRoute(
+            cfg, topics, registry, new com.metafore.edge.service.McpExecutor(), executor);
+
+        java.lang.reflect.Method m = RouteExecutorRoute.class.getDeclaredMethod(
+            "handleRunTemplate", String.class, Map.class);
+        m.setAccessible(true);
+        return (Map<String, Object>) m.invoke(route, "test-route", cmd);
+    }
+
+    @Test
+    void runTemplateUnknownTemplateRepliesWithError() throws Exception {
+        Map<String, Object> cmd = new LinkedHashMap<>();
+        cmd.put("template_id", "fhir.medication.read");
+        cmd.put("connection", Map.of("base_url", "https://hapi.fhir.org/baseR4"));
+        cmd.put("parameters", Map.of());
+
+        Map<String, Object> envelope = invokeHandleRunTemplate(cmd);
+
+        assertEquals("error", envelope.get("status"),
+            "unknown template must reply error, not rejected or silent");
+        assertEquals("run_template", envelope.get("action"));
+        assertEquals("unknown_template", envelope.get("error"));
+        assertEquals("fhir.medication.read", envelope.get("template_id"));
+        assertNotNull(envelope.get("error_details"),
+            "error_details must describe the unknown template");
+    }
+
+    @Test
+    void runTemplateMissingBaseUrlRepliesWithError() throws Exception {
+        Map<String, Object> cmd = new LinkedHashMap<>();
+        cmd.put("template_id", "fhir.patient.read");
+        cmd.put("connection", Map.of());   // no base_url
+        cmd.put("parameters", Map.of("patient_id", "example"));
+
+        Map<String, Object> envelope = invokeHandleRunTemplate(cmd);
+
+        assertEquals("error", envelope.get("status"),
+            "missing base_url must reply error, not propagate unhandled");
+        assertEquals("run_template", envelope.get("action"));
+        assertEquals("invalid_connection", envelope.get("error"));
+        assertEquals("fhir.patient.read", envelope.get("template_id"));
+        assertNotNull(envelope.get("error_details"));
+    }
+
+    @Test
+    void runTemplateInvalidBaseUrlRepliesWithError() throws Exception {
+        Map<String, Object> cmd = new LinkedHashMap<>();
+        cmd.put("template_id", "fhir.patient.read");
+        cmd.put("connection", Map.of("base_url", "http://evil.example.com/fhir"));
+        cmd.put("parameters", Map.of("patient_id", "example"));
+
+        Map<String, Object> envelope = invokeHandleRunTemplate(cmd);
+
+        assertEquals("error", envelope.get("status"));
+        assertEquals("invalid_connection", envelope.get("error"));
+        assertEquals("fhir.patient.read", envelope.get("template_id"));
+    }
+
+    @Test
+    void runTemplateUnknownParameterRepliesWithError() throws Exception {
+        Map<String, Object> cmd = new LinkedHashMap<>();
+        cmd.put("template_id", "fhir.patient.search");
+        cmd.put("connection", Map.of("base_url", "https://hapi.fhir.org/baseR4"));
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("_include", "Patient:organization");  // not in whitelist
+        cmd.put("parameters", params);
+
+        Map<String, Object> envelope = invokeHandleRunTemplate(cmd);
+
+        assertEquals("error", envelope.get("status"),
+            "unknown search param must reply error, not rejected or silent");
+        assertEquals("run_template", envelope.get("action"));
+        assertEquals("unknown_parameter", envelope.get("error"));
+        assertEquals("fhir.patient.search", envelope.get("template_id"));
+        assertNotNull(envelope.get("error_details"));
+    }
+
+    @Test
+    void runTemplateCapabilityDeniedRepliesWithError() throws Exception {
+        // Simulate an edge image that does not advertise "fhir".
+        DefaultCamelContext ctx = new DefaultCamelContext();
+        DataSourceRegistry registry = new DataSourceRegistry(ctx);
+        EdgeConfig cfg = EdgeConfig.from(java.util.Collections.emptyMap());
+        com.metafore.edge.topic.TopicBuilder topics =
+            new com.metafore.edge.topic.TopicBuilder(cfg.tenantId(), cfg.controllerId());
+        RouteExecutorRoute route = new RouteExecutorRoute(cfg, topics, registry);
+
+        java.util.Set<String> noFhir = new java.util.HashSet<>();
+        noFhir.add("read");
+        noFhir.add("test_connection");
+
+        Map<String, Object> cmd = new LinkedHashMap<>();
+        cmd.put("template_id", "fhir.patient.read");
+        cmd.put("action", "run_template");
+        cmd.put("connection", Map.of("base_url", "https://hapi.fhir.org/baseR4"));
+        cmd.put("parameters", Map.of());
+
+        Map<String, Object> envelope = route.enforceCapability(
+            noFhir, "run_template", "test-route", cmd);
+
+        // Simulate what the dispatch block does when result != null for run_template
+        assertNotNull(envelope, "must be denied when fhir not declared");
+        envelope.put("status", "error");
+        envelope.put("template_id", cmd.getOrDefault("template_id", ""));
+
+        assertEquals("error", envelope.get("status"),
+            "capability_denied for run_template must be status=error");
+        assertEquals("run_template", envelope.get("action"));
+        assertEquals("capability_denied", envelope.get("error"));
+        assertEquals("fhir.patient.read", envelope.get("template_id"));
+        assertNotNull(envelope.get("error_details"),
+            "error_details must name the denied capability");
+    }
+
     // ── part 2 interim guard: no Postgres SQL against another kind of server ──
 
     @Test

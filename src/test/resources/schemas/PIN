@@ -1,5 +1,6 @@
 # Pinned MQTT contract schemas. Change them only with scripts/sync-contracts.sh (never by hand).
 source_repo=Metafore-Platform/metafore-api
-source_commit=391469e53275866220385623c15227ae54d2f1da
+source_commit=e575cf24ba6a610fa02a4fb3cf20388de8da93c4
 route_command.schema.json=dc4b5031699f7df13d43aec20f8315e5494174073b35504e1bbce5fda23ca6b4
-route_result.schema.json=31c5ad103d95eae4d9737b987004b933a158b265179ff662dbe1924d4a94c5bf
+route_result.schema.json=cc5ad7f79b948369a6bdb068bbafc077cbca67ed010c63750e72ed84e9c75683
+registration.schema.json=897e64b738a43cd331c9091a086ba0f15693bbd3b098a23a831eca44ecfb118d

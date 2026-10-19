@@ -161,4 +161,53 @@ class RouteCommandContractTest {
         assertEquals(Set.of(), errors, errors.toString());
         assertFalse(check(RESULT, ok.replace("\"success\"", "\"great\"")).isEmpty());
     }
+
+    // ── task 828b1be6 — run_template results validate against pinned route_result ──
+
+    @Test
+    void runTemplateSuccessResultValidatesAgainstPinnedSchema() throws Exception {
+        // success envelope: action=run_template, template_id echoed, row_count, data
+        String json = "{\"controller_id\":\"edge-1\",\"tenant_id\":\"acme\",\"route_id\":\"r-1\","
+            + "\"timestamp\":\"2026-10-13T12:00:00Z\","
+            + "\"status\":\"success\","
+            + "\"action\":\"run_template\","
+            + "\"template_id\":\"fhir.patient.read\","
+            + "\"latency_ms\":123,"
+            + "\"row_count\":1,"
+            + "\"data\":[{\"resourceType\":\"Patient\",\"id\":\"example\"}]}";
+        Set<ValidationMessage> errors = check(RESULT, json);
+        assertEquals(Set.of(), errors,
+            "run_template success result must validate against pinned route_result.schema.json: " + errors);
+    }
+
+    @Test
+    void runTemplateErrorResultValidatesAgainstPinnedSchema() throws Exception {
+        // error envelope: action=run_template, template_id, error code, error_details
+        String json = "{\"controller_id\":\"edge-1\",\"tenant_id\":\"acme\",\"route_id\":\"r-1\","
+            + "\"timestamp\":\"2026-10-13T12:00:00Z\","
+            + "\"status\":\"error\","
+            + "\"action\":\"run_template\","
+            + "\"template_id\":\"fhir.medication.read\","
+            + "\"latency_ms\":0,"
+            + "\"error\":\"unknown_template\","
+            + "\"error_details\":\"Unknown FHIR template fhir.medication.read\"}";
+        Set<ValidationMessage> errors = check(RESULT, json);
+        assertEquals(Set.of(), errors,
+            "run_template error result must validate against pinned route_result.schema.json: " + errors);
+    }
+
+    @Test
+    void runTemplateInvalidConnectionErrorValidatesAgainstPinnedSchema() throws Exception {
+        String json = "{\"controller_id\":\"edge-1\",\"tenant_id\":\"acme\",\"route_id\":\"r-1\","
+            + "\"timestamp\":\"2026-10-13T12:00:00Z\","
+            + "\"status\":\"error\","
+            + "\"action\":\"run_template\","
+            + "\"template_id\":\"fhir.patient.read\","
+            + "\"latency_ms\":0,"
+            + "\"error\":\"invalid_connection\","
+            + "\"error_details\":\"connection.base_url is required for run_template\"}";
+        Set<ValidationMessage> errors = check(RESULT, json);
+        assertEquals(Set.of(), errors,
+            "run_template invalid_connection error must validate against pinned route_result.schema.json: " + errors);
+    }
 }
