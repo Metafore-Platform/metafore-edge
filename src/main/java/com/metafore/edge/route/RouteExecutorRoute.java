@@ -1,5 +1,9 @@
 package com.metafore.edge.route;
 
+import com.metafore.edge.log.CommandLog;
+import org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
+import com.metafore.edge.log.Redactor;
 import com.metafore.edge.config.EdgeConfig;
 import com.metafore.edge.db.DialectGate;
 import com.metafore.edge.message.MessageFactory;
@@ -18,6 +22,8 @@ import javax.sql.DataSource;
 import java.util.*;
 
 public class RouteExecutorRoute extends RouteBuilder {
+    private static final Logger LOG = LoggerFactory.getLogger(RouteExecutorRoute.class);
+
 
     private final EdgeConfig config;
     private final TopicBuilder topics;
@@ -55,8 +61,9 @@ public class RouteExecutorRoute extends RouteBuilder {
         String camelRouteId = "route-executor-" + topics.tenantId();
         from("paho:" + topics.controlRoutes() + "?brokerUrl=" + config.brokerUrl())
             .routeId(camelRouteId)
-            .log("Route command received on tenant=" + topics.tenantId() + ": ${body}")
-            .unmarshal().json(Map.class)
+            .process(exchange -> CommandLog.received(LOG, "Route command received on tenant=" + topics.tenantId(),
+                exchange.getIn().getBody(String.class)))
+            .process(exchange -> exchange.getIn().setBody(Redactor.parse(exchange.getIn().getBody(String.class))))
             .process(exchange -> {
                 @SuppressWarnings("unchecked")
                 Map<String, Object> cmd = exchange.getIn().getBody(Map.class);

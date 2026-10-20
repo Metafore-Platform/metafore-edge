@@ -1,5 +1,7 @@
 package com.metafore.edge.route;
 
+import com.metafore.edge.log.CommandLog;
+import com.metafore.edge.log.Redactor;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.metafore.edge.config.EdgeConfig;
 import com.metafore.edge.message.MessageFactory;
@@ -66,8 +68,9 @@ public class RestAdapterRoute extends RouteBuilder {
         String routeId = "rest-adapter-" + topics.tenantId();
         from("paho:" + topics.controlWriteBack() + "?brokerUrl=" + config.brokerUrl())
             .routeId(routeId)
-            .log("Write-back command received: ${body}")
-            .unmarshal().json(Map.class)
+            .process(exchange -> CommandLog.received(LOG, "Write-back command received",
+                exchange.getIn().getBody(String.class)))
+            .process(exchange -> exchange.getIn().setBody(Redactor.parse(exchange.getIn().getBody(String.class))))
             .process(exchange -> {
                 @SuppressWarnings("unchecked")
                 Map<String, Object> cmd = exchange.getIn().getBody(Map.class);
@@ -146,7 +149,7 @@ public class RestAdapterRoute extends RouteBuilder {
                 reqBuilder.build(), HttpResponse.BodyHandlers.ofString());
             long latency = System.currentTimeMillis() - start;
 
-            LOG.info("REST {} {} -> {} ({}ms)", method, url,
+            LOG.info("REST {} {} -> {} ({}ms)", method, Redactor.url(url),
                 response.statusCode(), latency);
 
             String status = response.statusCode() >= 200 && response.statusCode() < 300
@@ -156,7 +159,7 @@ public class RestAdapterRoute extends RouteBuilder {
                 status, response.statusCode(), response.body(), oldValues, newValues);
 
         } catch (Exception e) {
-            LOG.error("REST call failed: {} {}", method, url, e);
+            LOG.error("REST call failed: {} {}: {}", method, Redactor.url(url), Redactor.text(String.valueOf(e)));
             return MessageFactory.writeBackResult(config, actionId,
                 "error", 0, "Exception: " + e.getMessage(), oldValues, newValues);
         }
