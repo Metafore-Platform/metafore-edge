@@ -1,5 +1,6 @@
 package com.metafore.edge.route;
 
+import com.metafore.edge.log.Redactor;
 import com.fasterxml.jackson.databind.MappingIterator;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.csv.CsvMapper;
@@ -90,14 +91,14 @@ public class FileFeedRoute extends RouteBuilder {
         String feedId = String.valueOf(cmd.get("feed_id"));
         String uri = String.valueOf(cmd.get("uri"));
         if (feedId == null || feedId.isBlank() || uri == null || uri.isBlank()) {
-            LOG.warn("[file-feed] declaration missing feed_id or uri: {}", cmd);
+            LOG.warn("[file-feed] declaration missing feed_id or uri: {}", Redactor.map(cmd));
             return;
         }
         if (!uri.startsWith("file:") && !uri.startsWith("sftp:") && !uri.startsWith("ftp:")) {
             // Refuse rather than hand an arbitrary string to the component
             // registry — a feed is a file drop, not a way to reach anything.
             LOG.error("[file-feed] {} refused: uri must be file:, sftp: or ftp:, got {}",
-                      feedId, uri);
+                      feedId, Redactor.url(uri));
             return;
         }
         long delay = asLong(cmd.get("delay_ms"), 86_400_000L);
@@ -155,7 +156,7 @@ public class FileFeedRoute extends RouteBuilder {
             }
         });
         LOG.info("[file-feed] {} consuming {} every {}ms as {}",
-                 feedId, uri, delay, format);
+                 feedId, Redactor.url(uri), delay, format);
     }
 
     /**

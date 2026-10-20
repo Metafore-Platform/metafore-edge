@@ -1,5 +1,6 @@
 package com.metafore.edge.service;
 
+import com.metafore.edge.log.Redactor;
 import com.metafore.edge.db.DataSources;
 import com.metafore.edge.db.DbType;
 import org.apache.camel.CamelContext;
@@ -164,7 +165,7 @@ public final class DataSourceRegistry {
                 camelContext.getRegistry().bind(name, other);
                 LOG.info("DataSource registered: {} -> {}", name, DataSources.url(type, host, port, dbName));
             } catch (Exception e) {
-                LOG.warn("Failed to register {} DataSource {}: {}", type.wireName(), name, e.getMessage());
+                LOG.warn("Failed to register {} DataSource {}: {}", type.wireName(), name, Redactor.text(e.getMessage()));
             }
             return;
         }
@@ -200,7 +201,7 @@ public final class DataSourceRegistry {
             LOG.info("DataSource registered: {} -> {} (defaultRowFetchSize={})",
                 name, url, effectiveFetchSize);
         } catch (Exception e) {
-            LOG.warn("Failed to register DataSource {}: {}", name, e.getMessage());
+            LOG.warn("Failed to register DataSource {}: {}", name, Redactor.text(e.getMessage()));
         }
     }
 

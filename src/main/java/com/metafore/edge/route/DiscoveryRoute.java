@@ -1,5 +1,6 @@
 package com.metafore.edge.route;
 
+import com.metafore.edge.log.Redactor;
 import com.metafore.edge.config.EdgeConfig;
 import com.metafore.edge.message.MessageFactory;
 import com.metafore.edge.service.DiscoveryService;
@@ -48,7 +49,7 @@ public class DiscoveryRoute extends RouteBuilder {
             + "?brokerUrl=" + config.brokerUrl())
             .routeId("discovery-ondemand" + suffix)
             .log("Discovery command received")
-            .unmarshal().json(Map.class)
+            .process(exchange -> exchange.getIn().setBody(Redactor.parse(exchange.getIn().getBody(String.class))))
             .process(exchange -> {
                 @SuppressWarnings("unchecked")
                 Map<String, Object> cmd = exchange.getIn().getBody(Map.class);
