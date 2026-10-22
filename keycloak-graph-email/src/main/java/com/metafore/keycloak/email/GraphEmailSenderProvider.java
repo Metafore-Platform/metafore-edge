@@ -38,9 +38,22 @@ public class GraphEmailSenderProvider implements EmailSenderProvider {
         if (!factory.isConfigured()) {
             throw new EmailException("Graph email: not configured — set platform email settings");
         }
-        String token = factory.getAccessToken();
         String payload = buildPayload(address, subject, textBody, htmlBody);
         String url = factory.getGraphBaseUrl() + String.format(SEND_MAIL_PATH, encode(factory.getSender()));
+
+        int status = doSend(factory.getAccessToken(), url, payload);
+        if (status == 401) {
+            // Token was revoked or rotated before its cached expiry — drop cache and retry once
+            factory.invalidateToken();
+            status = doSend(factory.getAccessToken(), url, payload);
+        }
+        if (status < 200 || status >= 300) {
+            // log status only — never log response body (may contain token fragments) or payload
+            throw new EmailException("Graph email: sendMail returned " + status);
+        }
+    }
+
+    private int doSend(String token, String url, String payload) throws EmailException {
         HttpRequest req = HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .header("Authorization", "Bearer " + token)
@@ -49,12 +62,9 @@ public class GraphEmailSenderProvider implements EmailSenderProvider {
                 .timeout(Duration.ofSeconds(30))
                 .build();
         try {
-            HttpResponse<String> resp = factory.getHttpClient()
-                    .send(req, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() < 200 || resp.statusCode() >= 300) {
-                // log status only — never log response body (may contain tokens) or payload
-                throw new EmailException("Graph email: sendMail returned " + resp.statusCode());
-            }
+            return factory.getHttpClient()
+                    .send(req, HttpResponse.BodyHandlers.ofString())
+                    .statusCode();
         } catch (IOException | InterruptedException e) {
             if (e instanceof InterruptedException) {
                 Thread.currentThread().interrupt();

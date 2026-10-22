@@ -76,6 +76,10 @@ public class GraphEmailSenderProviderFactory implements EmailSenderProviderFacto
         return "https://graph.microsoft.com";
     }
 
+    void invalidateToken() {
+        tokenCache = null;
+    }
+
     boolean isConfigured() {
         return azureTenantId != null && !azureTenantId.isEmpty()
                 && clientId != null && !clientId.isEmpty()
@@ -106,7 +110,7 @@ public class GraphEmailSenderProviderFactory implements EmailSenderProviderFacto
         }
         String tokenUrl = String.format(TOKEN_URL_TEMPLATE, azureTenantId);
         String body = "grant_type=client_credentials"
-                + "&client_id=" + clientId
+                + "&client_id=" + encode(clientId)
                 + "&client_secret=" + encode(clientSecret)
                 + "&scope=https%3A%2F%2Fgraph.microsoft.com%2F.default";
         HttpRequest req = HttpRequest.newBuilder()

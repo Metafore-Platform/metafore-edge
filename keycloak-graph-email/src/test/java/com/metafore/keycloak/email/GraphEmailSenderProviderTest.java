@@ -12,8 +12,12 @@ import java.net.InetSocketAddress;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -32,6 +36,8 @@ class GraphEmailSenderProviderTest {
     private AtomicReference<String> lastSendMailBody;
     private int tokenStatus;
     private int sendMailStatus;
+    // Per-call override: if non-empty, handler pops statuses from here instead of sendMailStatus
+    private Queue<Integer> sendMailStatusQueue;
 
     @BeforeAll
     static void startServer() throws IOException {
@@ -51,6 +57,7 @@ class GraphEmailSenderProviderTest {
         lastSendMailBody = new AtomicReference<>("");
         tokenStatus = 200;
         sendMailStatus = 202;
+        sendMailStatusQueue = new ConcurrentLinkedQueue<>();
 
         server.createContext("/tenant-ok/oauth2/v2.0/token", exchange -> {
             tokenCallCount.incrementAndGet();
@@ -63,8 +70,9 @@ class GraphEmailSenderProviderTest {
 
         server.createContext("/v1.0/users/", exchange -> {
             lastSendMailBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
-            byte[] body = new byte[0];
-            exchange.sendResponseHeaders(sendMailStatus, body.length);
+            Integer queuedStatus = sendMailStatusQueue.poll();
+            int status = queuedStatus != null ? queuedStatus : sendMailStatus;
+            exchange.sendResponseHeaders(status, 0);
             exchange.getResponseBody().close();
         });
     }
@@ -192,6 +200,55 @@ class GraphEmailSenderProviderTest {
 
         @Override
         String getGraphBaseUrl() { return baseUrl; }
+    }
+
+    @Test
+    void sendMail_401_invalidatesTokenAndRetries() throws Exception {
+        // First call → 401, second call → 202
+        sendMailStatusQueue.add(401);
+        sendMailStatusQueue.add(202);
+
+        AtomicInteger tokenFetchCount = new AtomicInteger(0);
+        List<String> usedTokens = Collections.synchronizedList(new ArrayList<>());
+        HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+
+        // Override getAccessToken() to return different tokens per call, track invocations
+        GraphEmailSenderProviderFactory f = new StubFactory(client, null,
+                "sender@example.com", "", "", "http://localhost:" + port) {
+            @Override
+            String getAccessToken() {
+                return "token-" + tokenFetchCount.incrementAndGet();
+            }
+        };
+
+        // Capture tokens used in requests by reading the Authorization header from lastSendMailBody
+        // (we actually verify via doSend call count using the status queue size draining)
+        GraphEmailSenderProvider p = new GraphEmailSenderProvider(f);
+        UserModel user = Mockito.mock(UserModel.class);
+        Mockito.when(user.getEmail()).thenReturn("u@example.com");
+
+        p.send(Collections.emptyMap(), user, "S", "t", "h");
+
+        assertTrue(sendMailStatusQueue.isEmpty(), "both queued statuses consumed — two HTTP calls made");
+        assertEquals(2, tokenFetchCount.get(), "getAccessToken called twice (initial + after 401)");
+    }
+
+    @Test
+    void sendMail_401_persistentFails_throwsEmailException() {
+        // Both calls → 401: should throw after one retry
+        sendMailStatusQueue.add(401);
+        sendMailStatusQueue.add(401);
+
+        HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+        GraphEmailSenderProviderFactory f = new StubFactory(client, "fixed-tok",
+                "sender@example.com", "", "", "http://localhost:" + port);
+        GraphEmailSenderProvider p = new GraphEmailSenderProvider(f);
+        UserModel user = Mockito.mock(UserModel.class);
+        Mockito.when(user.getEmail()).thenReturn("u@example.com");
+
+        assertThrows(EmailException.class, () ->
+                p.send(Collections.emptyMap(), user, "S", "t", "h"));
+        assertTrue(sendMailStatusQueue.isEmpty(), "both queued statuses consumed — two HTTP calls made");
     }
 
     private String fetchTokenLocal() throws EmailException {
