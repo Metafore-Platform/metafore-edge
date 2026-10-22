@@ -26,7 +26,7 @@ jobs:
 
   build-and-push:
     needs: test
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && vars.EDGE_PUBLISH_ENABLED == 'true'
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -51,7 +51,7 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-to-assume: ${{ vars.EDGE_PUBLISH_ROLE_ARN }}
           aws-region: us-east-1
 
       - name: Login to Amazon ECR
@@ -60,8 +60,10 @@ jobs:
       - name: Build image and push to ECR
         id: push
         working-directory: keycloak-graph-email
+        env:
+          ECR_REGISTRY: 359469026479.dkr.ecr.us-east-1.amazonaws.com
         run: |
-          IMAGE=${{ vars.ECR_REGISTRY }}/metafore-dev/keycloak
+          IMAGE=$ECR_REGISTRY/metafore-dev/keycloak
           docker build -t $IMAGE:${{ github.sha }} .
           docker push $IMAGE:${{ github.sha }}
           DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' $IMAGE:${{ github.sha }} | cut -d@ -f2)
