@@ -1,6 +1,6 @@
 package com.metafore.keycloak.email;
 
-import org.jboss.logging.Logger;
+import java.util.logging.Logger;
 import org.keycloak.Config;
 import org.keycloak.email.EmailSenderProviderFactory;
 import org.keycloak.models.KeycloakSession;
@@ -20,7 +20,7 @@ import org.keycloak.email.EmailException;
 
 public class GraphEmailSenderProviderFactory implements EmailSenderProviderFactory {
 
-    private static final Logger LOG = Logger.getLogger(GraphEmailSenderProviderFactory.class);
+    private static final Logger LOG = Logger.getLogger(GraphEmailSenderProviderFactory.class.getName());
 
     static final String PROVIDER_ID = "graph";
 
@@ -62,8 +62,8 @@ public class GraphEmailSenderProviderFactory implements EmailSenderProviderFacto
         sender        = config.get("sender");
         displayName   = config.get("display-name", "");
         replyTo       = config.get("reply-to", "");
-        LOG.infof("Graph email provider initialised (configured: %b, sender: %s)",
-                isConfigured(), sender != null ? sender : "<not set>");
+        LOG.info(String.format("Graph email provider initialised (configured: %b, sender: %s)",
+                isConfigured(), sender != null ? sender : "<not set>"));
     }
 
     @Override
