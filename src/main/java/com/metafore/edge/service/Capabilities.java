@@ -46,7 +46,9 @@ public final class Capabilities {
             "read",
             "write",
             "ddl",
-            "mcp"
+            "mcp",
+            // task 828b1be6 — FHIR template registry: run_template dispatches to registered Camel FHIR routes.
+            "fhir"
         ))
     );
 
@@ -99,6 +101,9 @@ public final class Capabilities {
             case "deploy":
             case "execute":
                 return deriveForExecute(params);
+            // task 828b1be6 — run_template always requires the fhir capability.
+            case "run_template":
+                return "fhir";
             default:
                 return null;
         }

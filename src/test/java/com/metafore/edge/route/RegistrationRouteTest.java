@@ -70,8 +70,8 @@ class RegistrationRouteTest extends CamelTestSupport {
         assertFalse(caps.contains("jdbc"),
             "CCA.T2 — legacy 'jdbc' advertisement must not leak; the "
             + "platform preflight keys on canonical capability names");
-        // Phase 14.18 — single-tenant config — `tenants` carries
-        // [tenant_id] from EdgeConfig back-compat path.
-        assertEquals(List.of("test-tenant"), msg.get("tenants"));
+        // ADR-023: tenants must not be emitted in registration payload.
+        assertFalse(((java.util.Map<?,?>) msg).containsKey("tenants"),
+            "ADR-023: tenants must not appear in registration payload");
     }
 }

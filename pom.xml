@@ -68,6 +68,9 @@
       <artifactId>camel-csv</artifactId>
       <version>${camel.version}</version>
     </dependency>
+    <!-- task 828b1be6 — FhirTemplateExecutor uses java.net.http directly,
+         not the Camel FHIR component; camel-fhir is therefore omitted to
+         avoid pulling in HAPI FHIR as an unnecessary CVE surface. -->
     <!-- CsvMapper for header-bearing partner files. Declared explicitly rather
          than leaned on transitively: camel-csv uses commons-csv, so relying on
          this arriving by accident is how a build breaks on a dependency bump. -->
@@ -77,11 +80,36 @@
       <version>2.17.2</version>
     </dependency>
 
+    <!-- PEM private keys in every form cert-manager and openssl write (PKCS#8, SEC1 "EC PRIVATE KEY", PKCS#1) for the
+         MQTT client certificate (mqtt/MqttSecurity). The tests also build throw-away certificates with it. -->
+    <dependency>
+      <groupId>org.bouncycastle</groupId>
+      <artifactId>bcpkix-jdk18on</artifactId>
+      <version>1.78.1</version>
+    </dependency>
     <!-- Database -->
     <dependency>
       <groupId>org.postgresql</groupId>
       <artifactId>postgresql</artifactId>
       <version>42.7.4</version>
+    </dependency>
+    <!-- The other databases a source can be (v2 parity with the Go agent; Compass 0e4dda60, adr-059). MySQL and MariaDB both
+         use the MariaDB Connector/J (LGPL; mysql-connector-j is GPLv2 + FOSS exception, a licence risk in a product we ship).
+         mssql-jdbc is MIT; ojdbc is Oracle's free-use licence. -->
+    <dependency>
+      <groupId>org.mariadb.jdbc</groupId>
+      <artifactId>mariadb-java-client</artifactId>
+      <version>3.5.1</version>
+    </dependency>
+    <dependency>
+      <groupId>com.microsoft.sqlserver</groupId>
+      <artifactId>mssql-jdbc</artifactId>
+      <version>12.8.1.jre11</version>
+    </dependency>
+    <dependency>
+      <groupId>com.oracle.database.jdbc</groupId>
+      <artifactId>ojdbc11</artifactId>
+      <version>23.5.0.24.07</version>
     </dependency>
 
     <!-- Logging -->
@@ -110,6 +138,13 @@
       <version>1.3.3</version>
       <scope>test</scope>
     </dependency>
+    <!-- task 828b1be6 — Mockito for FhirTemplateExecutorTest HttpClient mocking -->
+    <dependency>
+      <groupId>org.mockito</groupId>
+      <artifactId>mockito-core</artifactId>
+      <version>5.11.0</version>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 
   <build>
@@ -134,6 +169,8 @@
           <excludes>
             <exclude>**/*IT.java</exclude>
           </excludes>
+          <!-- Mockito inline mock maker needs dynamic agent loading on JDK 21+ -->
+          <argLine>-XX:+EnableDynamicAgentLoading</argLine>
         </configuration>
       </plugin>
       <plugin>

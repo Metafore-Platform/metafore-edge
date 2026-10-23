@@ -1,42 +1,54 @@
 package com.metafore.edge.route;
 
+import com.metafore.edge.log.CommandLog;
+import org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
+import com.metafore.edge.log.Redactor;
 import com.metafore.edge.config.EdgeConfig;
+import com.metafore.edge.db.DialectGate;
 import com.metafore.edge.message.MessageFactory;
 import com.metafore.edge.service.Capabilities;
-import com.metafore.edge.service.ConnectionTester;
 import com.metafore.edge.service.DataSourceRegistry;
+import com.metafore.edge.service.FhirTemplateExecutor;
 import com.metafore.edge.service.McpExecutor;
 import com.metafore.edge.service.ShellExecutor;
 import com.metafore.edge.service.SqlExecutor;
+import com.metafore.edge.topic.ReplyTopic;
 import com.metafore.edge.topic.TopicBuilder;
 import org.apache.camel.builder.RouteBuilder;
+import org.apache.camel.component.paho.PahoConstants;
 
 import javax.sql.DataSource;
 import java.util.*;
 
 public class RouteExecutorRoute extends RouteBuilder {
+    private static final Logger LOG = LoggerFactory.getLogger(RouteExecutorRoute.class);
+
 
     private final EdgeConfig config;
     private final TopicBuilder topics;
     private final DataSourceRegistry dsRegistry;
     private final McpExecutor mcpExecutor;
+    private final FhirTemplateExecutor fhirExecutor;
 
     public RouteExecutorRoute(EdgeConfig config, TopicBuilder topics,
                               DataSourceRegistry dsRegistry) {
-        this(config, topics, dsRegistry, new McpExecutor());
+        this(config, topics, dsRegistry, new McpExecutor(), new FhirTemplateExecutor());
     }
 
     /**
-     * adr-158 — test-friendly constructor accepting a pre-built
-     * {@link McpExecutor} (wrapping a mock HttpClient) so the MCP
-     * dispatch branch is exercised without a live MCP server.
+     * Test-friendly constructor accepting pre-built executors (wrapping mock
+     * HttpClients) so MCP and FHIR dispatch branches are exercised without
+     * live servers. adr-158 (MCP), task 828b1be6 (FHIR).
      */
     RouteExecutorRoute(EdgeConfig config, TopicBuilder topics,
-                       DataSourceRegistry dsRegistry, McpExecutor mcpExecutor) {
+                       DataSourceRegistry dsRegistry, McpExecutor mcpExecutor,
+                       FhirTemplateExecutor fhirExecutor) {
         this.config = config;
         this.topics = topics;
         this.dsRegistry = dsRegistry;
         this.mcpExecutor = mcpExecutor;
+        this.fhirExecutor = fhirExecutor;
     }
 
     @Override
@@ -49,16 +61,25 @@ public class RouteExecutorRoute extends RouteBuilder {
         String camelRouteId = "route-executor-" + topics.tenantId();
         from("paho:" + topics.controlRoutes() + "?brokerUrl=" + config.brokerUrl())
             .routeId(camelRouteId)
-            .log("Route command received on tenant=" + topics.tenantId() + ": ${body}")
-            .unmarshal().json(Map.class)
+            .process(exchange -> CommandLog.received(LOG, "Route command received on tenant=" + topics.tenantId(),
+                exchange.getIn().getBody(String.class)))
+            .process(exchange -> exchange.getIn().setBody(Redactor.parse(exchange.getIn().getBody(String.class))))
             .process(exchange -> {
                 @SuppressWarnings("unchecked")
                 Map<String, Object> cmd = exchange.getIn().getBody(Map.class);
                 String action = (String) cmd.getOrDefault("action", "");
                 String routeId = (String) cmd.getOrDefault("route_id", "");
+                // v2: the command's own reply topic, only when it is this edge's per-edge topic (topic/ReplyTopic)
+                exchange.setProperty("mfReplyTopic", ReplyTopic.forEdge(cmd.get("response_topic"), topics));
 
                 Map<String, Object> result = enforceCapability(action, routeId, cmd);
                 if (result != null) {
+                    // task 828b1be6: run_template must fail-fast with status=error
+                    // (not rejected) and echo template_id so platform can correlate.
+                    if ("run_template".equals(action)) {
+                        result.put("status", "error");
+                        result.put("template_id", cmd.getOrDefault("template_id", ""));
+                    }
                     exchange.getIn().setBody(result);
                     return;
                 }
@@ -70,11 +91,14 @@ public class RouteExecutorRoute extends RouteBuilder {
                     // probe. Does NOT touch dsRegistry; does NOT route
                     // through SqlExecutor whitelist. See
                     // ConnectionTester for the typed-reason taxonomy.
-                    result = handleConnectAndPing(routeId, cmd);
+                    result = SourceCommands.connectAndPing(config, routeId, cmd);
                 } else if ("remove".equals(action)) {
                     dsRegistry.remove(routeId);
                     result = MessageFactory.routeResult(config, routeId,
                         "success", null, 0, null, null, null, null, null);
+                } else if ("run_template".equals(action)) {
+                    // task 828b1be6 — FHIR template registry
+                    result = handleRunTemplate(routeId, cmd);
                 } else {
                     result = MessageFactory.routeResult(config, routeId,
                         "error", null, 0, null, null, null,
@@ -84,8 +108,16 @@ public class RouteExecutorRoute extends RouteBuilder {
                 exchange.getIn().setBody(result);
             })
             .marshal().json()
+            // one String the telemetry publish and the reply publish both send in full (a stream is read once)
+            .convertBodyTo(String.class)
             .to("paho:" + topics.telemetryRouteResults()
-                + "?brokerUrl=" + config.brokerUrl())
+                + "?brokerUrl=" + config.brokerUrl()).id("route-result-publish")
+            .choice()
+                .when(exchangeProperty("mfReplyTopic").isNotNull())
+                    // the topic goes in as a header on a FIXED endpoint, never into an endpoint URI built from the command
+                    .setHeader(PahoConstants.CAMEL_PAHO_OVERRIDE_TOPIC, exchangeProperty("mfReplyTopic"))
+                    .to("paho:" + topics.responsePrefix() + "reply?brokerUrl=" + config.brokerUrl()).id("route-reply-publish")
+            .end()
             .log("Route result published");
     }
 
@@ -157,27 +189,15 @@ public class RouteExecutorRoute extends RouteBuilder {
         }
 
         // Register DataSource if DB params present
-        if (params.containsKey("db_host") || params.containsKey("DB_HOST")) {
-            String dbHost = str(params, "db_host", "DB_HOST", "localhost");
-            String dbPort = str(params, "db_port", "DB_PORT", "5432");
-            String dbName = str(params, "db_name", "DB_NAME", "");
-            String dbUser = str(params, "db_user", "DB_USER", "root");
-            String dbPass = str(params, "db_pass", "DB_PASS", "");
-            // adr — one pool per DATABASE, not one per request. Core mints a
-            // fresh route id per invocation for correlation, so registering
-            // under it made every read and write leak a connection pool: 3,121
-            // of them on the phluence controller before the JVM ran out of heap
-            // and stopped answering route commands (2026-08-30). The pool
-            // depends on where it connects, not on who asked.
-            dsRegistry.register(
-                DataSourceRegistry.connectionKey(dbHost, dbPort, dbName, dbUser),
-                dbHost, dbPort, dbName, dbUser, dbPass);
+        Map<String, Object> refusedSource = SourceCommands.register(config, dsRegistry, routeId, params);
+        if (refusedSource != null) {
+            return refusedSource;
         }
 
         // Check for shell command
         String shellCmd = params != null ? (String) params.get("shell_command") : null;
         if (shellCmd == null && routeYaml != null && routeYaml.contains("exec:")) {
-            shellCmd = extractShellCommand(routeYaml);
+            shellCmd = RouteYamlExtractor.extractShellCommand(routeYaml);
         }
 
         if (shellCmd != null && !shellCmd.isEmpty()) {
@@ -199,9 +219,10 @@ public class RouteExecutorRoute extends RouteBuilder {
         // raw-SQL command can reach the database.
         String legacySql = params != null ? (String) params.get("sql") : null;
         if (legacySql == null && routeYaml != null) {
-            legacySql = extractQuery(routeYaml);
+            legacySql = RouteYamlExtractor.extractQuery(routeYaml);
         }
-        PayloadKind kind = classifyPayload(params, legacySql);
+        RouteYamlExtractor.PayloadKind kind =
+            RouteYamlExtractor.classifyPayload(params, legacySql);
         switch (kind) {
             case AMBIGUOUS:
                 return MessageFactory.routeResult(config, routeId,
@@ -236,50 +257,6 @@ public class RouteExecutorRoute extends RouteBuilder {
     }
 
     /**
-     * Slice 33.1.0 — payload-shape classifier for the dispatch
-     * boundary. Package-private so the four-state branching is
-     * directly testable without Camel scaffolding.
-     */
-    enum PayloadKind { PARAMETRIC, LEGACY, AMBIGUOUS, MISSING }
-
-    static PayloadKind classifyPayload(
-        Map<String, Object> params, String legacySql
-    ) {
-        boolean hasOperation = false;
-        if (params != null) {
-            Object op = params.get("operation");
-            if (op instanceof String) {
-                hasOperation = !((String) op).isBlank();
-            }
-        }
-        boolean hasSql = legacySql != null && !legacySql.isEmpty();
-        if (hasOperation && hasSql) return PayloadKind.AMBIGUOUS;
-        if (!hasOperation && !hasSql) return PayloadKind.MISSING;
-        return hasOperation ? PayloadKind.PARAMETRIC : PayloadKind.LEGACY;
-    }
-
-    /**
-     * Which pool serves this command.
-     *
-     * The connection key when the command carries db params — the same key
-     * {@code handleExecute} registered under. Falls back to the route id, then
-     * (via the registry) to "default", so a command shaped differently than
-     * expected still reaches a database rather than failing with "no database
-     * connection available".
-     */
-    private static String dataSourceKey(Map<String, Object> params, String routeId) {
-        if (params != null
-            && (params.containsKey("db_host") || params.containsKey("DB_HOST"))) {
-            return DataSourceRegistry.connectionKey(
-                str(params, "db_host", "DB_HOST", "localhost"),
-                str(params, "db_port", "DB_PORT", "5432"),
-                str(params, "db_name", "DB_NAME", ""),
-                str(params, "db_user", "DB_USER", "root"));
-        }
-        return routeId;
-    }
-
-    /**
      * Slice 33.1.0 — parametric CRUD dispatch via JDBC PreparedStatement.
      * Reads structured payload, delegates to
      * ``SqlExecutor.executeParametric`` which validates table +
@@ -289,14 +266,18 @@ public class RouteExecutorRoute extends RouteBuilder {
     private Map<String, Object> executeParametric(
         String routeId, Map<String, Object> params
     ) {
-        DataSource ds = dsRegistry.get(dataSourceKey(params, routeId));
+        String operation = (String) params.get("operation");
+        String refused = DialectGate.refusal(params, operation);
+        if (refused != null) {
+            return MessageFactory.routeResult(config, routeId, "error", "execute", 0,
+                null, null, null, refused, DialectGate.REFUSAL);
+        }
+        DataSource ds = dsRegistry.get(SourceCommands.dataSourceKey(params, routeId));
         if (ds == null) {
             return MessageFactory.routeResult(config, routeId,
                 "error", "execute", 0, null, null, null,
                 "No database connection available", null);
         }
-
-        String operation = (String) params.get("operation");
 
         // ADR-016 F1.T2b — "read" op has a richer payload shape
         // (pattern + filter_column + filter_value / filter_values +
@@ -334,10 +315,8 @@ public class RouteExecutorRoute extends RouteBuilder {
         }
         List<Object> values = new ArrayList<>((List<Object>) valsObj);
 
-        Map<String, Object> execResult = SqlExecutor.executeParametric(
-            ds, operation, tableName, columns, values,
-            whereColumn, whereValue
-        );
+        Map<String, Object> execResult = SourceCommands.executeParametric(
+            params, ds, operation, tableName, columns, values, whereColumn, whereValue);
         String status = (String) execResult.get("status");
         String action = (String) execResult.getOrDefault("action", "execute");
         long latency = ((Number) execResult.get("latency_ms")).longValue();
@@ -368,7 +347,7 @@ public class RouteExecutorRoute extends RouteBuilder {
         String routeId, DataSource ds, Map<String, Object> params
     ) {
         Map<String, Object> execResult =
-            SqlExecutor.executeParametricRead(ds, params);
+            SourceCommands.executeRead(params, ds);
         String status = (String) execResult.get("status");
         String action = (String) execResult.getOrDefault("action", "query");
         long latency = ((Number) execResult.get("latency_ms")).longValue();
@@ -464,51 +443,59 @@ public class RouteExecutorRoute extends RouteBuilder {
     // can reach the database.
 
     /**
-     * Phase 14.12 / MTBC.T1 — handle a {@code connect_and_ping} verb.
-     *
-     * <p>Reads {@code db_host}, {@code db_port}, {@code db_name},
-     * {@code db_user}, {@code db_pass} from the command parameters
-     * (case-tolerant per existing {@link #str} helper), opens a
-     * transient JDBC connection from the edge's <em>runtime context</em>,
-     * runs {@code SELECT version(), current_database()}, returns the
-     * standard routeResult envelope with the typed reason on failure.
-     *
-     * <p>Crucially: no side effect. {@link DataSourceRegistry} is NOT
-     * touched. The transient {@code DataSource} is closed via
-     * try-with-resources inside {@link ConnectionTester#probe} and goes
-     * out of scope when this method returns.
-     *
-     * <p>The probe action on the wire is {@code "connect_and_ping"} so
-     * core's response handler can demultiplex from routine reads.
-     * Error envelope uses the typed reason (e.g. {@code "host_unresolved"})
-     * as the {@code error} field — assistant routes on this without
-     * parsing free-text. The raw driver message goes in
-     * {@code error_details} for the diagnostic collapsible in the UI.
+     * task 828b1be6 — dispatch a {@code run_template} command to
+     * {@link FhirTemplateExecutor} and wrap the result in the standard
+     * route-result envelope.
      */
     @SuppressWarnings("unchecked")
-    private Map<String, Object> handleConnectAndPing(
+    private Map<String, Object> handleRunTemplate(
         String routeId, Map<String, Object> cmd
     ) {
+        String templateId = (String) cmd.getOrDefault("template_id", "");
+        Map<String, Object> connection = (Map<String, Object>)
+            cmd.getOrDefault("connection", Map.of());
         Map<String, Object> params = (Map<String, Object>)
-            cmd.getOrDefault("parameters", Collections.emptyMap());
-
-        String dbHost = str(params, "db_host", "DB_HOST", "");
-        String dbPort = str(params, "db_port", "DB_PORT", "5432");
-        String dbName = str(params, "db_name", "DB_NAME", "");
-        String dbUser = str(params, "db_user", "DB_USER", "");
-        String dbPass = str(params, "db_pass", "DB_PASS", "");
-
-        ConnectionTester.ProbeResult probe =
-            ConnectionTester.probe(dbHost, dbPort, dbName, dbUser, dbPass);
-
-        if (probe.ok()) {
-            return MessageFactory.routeResult(config, routeId,
-                "success", "connect_and_ping", probe.latencyMs(),
-                null, null, probe.data(), null, null);
+            cmd.getOrDefault("parameters", Map.of());
+        try {
+            Map<String, Object> execResult =
+                fhirExecutor.execute(templateId, connection, params);
+            String status = (String) execResult.get("status");
+            String action = (String) execResult.getOrDefault("action", "run_template");
+            long latency =
+                ((Number) execResult.getOrDefault("latency_ms", 0L)).longValue();
+            Integer rowCount = (Integer) execResult.get("row_count");
+            List<Map<String, Object>> data =
+                (List<Map<String, Object>>) execResult.get("data");
+            String error = (String) execResult.get("error");
+            String errorDetails = (String) execResult.get("error_details");
+            Map<String, Object> result = MessageFactory.routeResult(config, routeId,
+                status, action, latency, rowCount, null, data, error, errorDetails);
+            // Echo template_id so platform can correlate result to request.
+            if (execResult.containsKey("template_id")) {
+                result.put("template_id", execResult.get("template_id"));
+            }
+            return result;
+        } catch (FhirTemplateExecutor.UnknownTemplateException e) {
+            // task 828b1be6: fail fast, never silent — error not rejected
+            Map<String, Object> r = MessageFactory.routeResult(config, routeId,
+                "error", "run_template", 0, null, null, null,
+                "unknown_template", e.getMessage());
+            r.put("template_id", templateId);
+            return r;
+        } catch (FhirTemplateExecutor.UnknownParameterException e) {
+            Map<String, Object> r = MessageFactory.routeResult(config, routeId,
+                "error", "run_template", 0, null, null, null,
+                "unknown_parameter", e.getMessage());
+            r.put("template_id", templateId);
+            return r;
+        } catch (IllegalArgumentException e) {
+            // missing / invalid connection.base_url
+            Map<String, Object> r = MessageFactory.routeResult(config, routeId,
+                "error", "run_template", 0, null, null, null,
+                "invalid_connection", e.getMessage());
+            r.put("template_id", templateId);
+            return r;
         }
-        return MessageFactory.routeResult(config, routeId,
-            "error", "connect_and_ping", probe.latencyMs(),
-            null, null, null, probe.reason(), probe.message());
     }
 
     private static String str(Map<String, Object> params,
@@ -518,31 +505,4 @@ public class RouteExecutorRoute extends RouteBuilder {
         return v != null ? String.valueOf(v) : def;
     }
 
-    static String extractQuery(String routeYaml) {
-        if (routeYaml == null) return null;
-        int idx = routeYaml.indexOf("query:");
-        if (idx < 0) idx = routeYaml.indexOf("query :");
-        if (idx < 0) return null;
-        String after = routeYaml.substring(idx + 6).trim();
-        if (after.startsWith(">")) after = after.substring(1).trim();
-        StringBuilder sb = new StringBuilder();
-        for (String line : after.split("\n")) {
-            String trimmed = line.trim();
-            if (sb.length() > 0 && !trimmed.isEmpty()
-                && (trimmed.startsWith("-") || trimmed.contains(":"))) break;
-            if (!trimmed.isEmpty()) {
-                if (sb.length() > 0) sb.append(" ");
-                sb.append(trimmed);
-            }
-        }
-        return sb.toString().trim();
-    }
-
-    static String extractShellCommand(String routeYaml) {
-        if (routeYaml == null) return null;
-        int idx = routeYaml.indexOf("exec:");
-        if (idx < 0) return null;
-        String after = routeYaml.substring(idx + 5).trim();
-        return after.split("\n")[0].trim();
-    }
 }

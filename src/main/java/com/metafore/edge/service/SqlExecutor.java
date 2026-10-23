@@ -43,7 +43,7 @@ public final class SqlExecutor {
         "uuid"
     );
 
-    private static final int MAX_ROWS = 100;
+    static final int MAX_ROWS = 100;
 
     // Absolute page-size ceiling for keyset (``list``) reads. This is
     // DECOUPLED from MAX_ROWS: MAX_ROWS is the legacy per-fetch memory
@@ -54,7 +54,7 @@ public final class SqlExecutor {
     // (postgres_managed / postgres_external manifests = 2000). Kept in sync
     // with that manifest value; the effective per-call ceiling is
     // min(requestedLimit, payload "max_page_size" when present, MAX_PAGE_SIZE).
-    private static final int MAX_PAGE_SIZE = 2000;
+    static final int MAX_PAGE_SIZE = 2000;
 
     /** Phase 14.6 / A6 — default schema when ``table_name`` is bare
      *  (unqualified). Matches PG's behaviour for queries without an
@@ -863,202 +863,34 @@ public final class SqlExecutor {
     ) {
         long start = System.currentTimeMillis();
 
-        if (payload == null) {
-            return errorResult(start, "query", "Missing read payload");
-        }
-        String pattern = (String) payload.get("pattern");
-        String tableName = (String) payload.get("table_name");
-        Object colsObj = payload.get("columns");
-        String filterColumn = (String) payload.get("filter_column");
-        Object filterValue = payload.get("filter_value");
-        Object filterValuesObj = payload.get("filter_values");
-        boolean excludeTombstoned = Boolean.TRUE.equals(
-            payload.get("exclude_tombstoned"));
-
-        // Phase 13 / REK.T2a — keyset pagination fields.
-        // keyset_field absent → behave exactly as pre-REK.T2a (back-compat).
-        String keysetField = (String) payload.get("keyset_field");
-        Object keysetValue = payload.get("keyset_value");
-        Object limitObj = payload.get("limit");
-        boolean keysetMode = keysetField != null && !keysetField.isBlank();
-
-        if (pattern == null || !Set.of(
-                "by_id", "by_ids", "list", "count").contains(pattern)) {
-            return errorResult(start, "query",
-                "Unsupported read pattern: " + pattern
-                + " (expected by_id/by_ids/list/count)");
-        }
-        if (tableName == null || tableName.isBlank()) {
-            return errorResult(start, "query",
-                "Missing or empty table_name");
-        }
-
-        // ADR-077 — optional abstract-predicate pushdown. Parsed early so a
-        // malformed predicate or unsupported op fails before any DB contact.
-        // Supported for list/count only (filter semantics).
-        List<WhereCond> whereConds;
+        ReadRequest req;
         try {
-            whereConds = parseWhereConditions(payload.get("where_conditions"));
+            req = ReadRequest.parse(payload);
         } catch (IllegalArgumentException e) {
             return errorResult(start, "query", e.getMessage());
         }
-        if (!whereConds.isEmpty()
-            && !("list".equals(pattern) || "count".equals(pattern))) {
-            return errorResult(start, "query",
-                "where_conditions is only supported for list/count patterns "
-                + "(got pattern=" + pattern + ")");
-        }
-
-        // Phase 14.6 / A6 — parse once for the read path too.
-        ParsedTableName parsedTable;
-        try {
-            parsedTable = parseTableName(tableName);
-        } catch (IllegalArgumentException e) {
-            return errorResult(start, "query", e.getMessage());
-        }
-
-        // Keyset-mode preconditions. Keyset semantics are list-only —
-        // ORDER BY + LIMIT on by_id / by_ids / count would either be a
-        // contradiction (by_id returns ≤1) or change scalar semantics
-        // (count). Reject loudly so misuse surfaces at the edge.
-        int effectiveLimit = 0;
-        if (keysetMode) {
-            if (!"list".equals(pattern)) {
-                return errorResult(start, "query",
-                    "keyset_field only supported with pattern=list "
-                    + "(got pattern=" + pattern + ")");
-            }
-            if (limitObj == null) {
-                return errorResult(start, "query",
-                    "keyset_field requires limit");
-            }
-            if (!(limitObj instanceof Number)) {
-                return errorResult(start, "query",
-                    "limit must be a number (got "
-                    + limitObj.getClass().getName() + ")");
-            }
-            int requestedLimit = ((Number) limitObj).intValue();
-            if (requestedLimit <= 0) {
-                return errorResult(start, "query",
-                    "limit must be positive (got " + requestedLimit + ")");
-            }
-            // Page size is bounded by the adapter's declared ceiling
-            // (payload "max_page_size", forwarded by the dispatcher), then
-            // by the edge's absolute MAX_PAGE_SIZE safety ceiling — NOT by
-            // MAX_ROWS. The has_more sentinel (limit+1) is honored by
-            // fetchCap below, which uses effectiveLimit+1 in keyset mode.
-            int pageCeiling = MAX_PAGE_SIZE;
-            Object maxPageSizeObj = payload.get("max_page_size");
-            if (maxPageSizeObj instanceof Number) {
-                int declared = ((Number) maxPageSizeObj).intValue();
-                if (declared > 0) {
-                    pageCeiling = Math.min(pageCeiling, declared);
-                }
-            }
-            effectiveLimit = Math.min(requestedLimit, pageCeiling);
-        }
-
-        // Pattern-specific required fields.
-        List<Object> filterValues = null;
-        if ("by_id".equals(pattern)) {
-            if (filterColumn == null || filterColumn.isBlank()) {
-                return errorResult(start, "query",
-                    "by_id pattern requires filter_column");
-            }
-            if (filterValue == null) {
-                return errorResult(start, "query",
-                    "by_id pattern requires filter_value");
-            }
-        } else if ("by_ids".equals(pattern)) {
-            if (filterColumn == null || filterColumn.isBlank()) {
-                return errorResult(start, "query",
-                    "by_ids pattern requires filter_column");
-            }
-            if (!(filterValuesObj instanceof List)) {
-                return errorResult(start, "query",
-                    "by_ids pattern requires filter_values list");
-            }
-            filterValues = new ArrayList<>((List<Object>) filterValuesObj);
-            if (filterValues.isEmpty()) {
-                return errorResult(start, "query",
-                    "by_ids pattern requires non-empty filter_values");
-            }
-            if (filterValues.size() > MAX_ROWS) {
-                return errorResult(start, "query",
-                    "by_ids filter_values exceeds MAX_ROWS=" + MAX_ROWS
-                    + " (size=" + filterValues.size() + ")");
-            }
-        } else {
-            // list / count — filter_column is optional; if present,
-            // filter_value is required.
-            if (filterColumn != null && !filterColumn.isBlank()
-                && filterValue == null) {
-                return errorResult(start, "query",
-                    pattern + " pattern with filter_column requires "
-                    + "filter_value");
-            }
-        }
-
-        // Normalize projection columns. Count ignores projection.
-        List<String> columns;
-        if ("count".equals(pattern)) {
-            columns = java.util.Collections.emptyList();
-        } else if (colsObj instanceof List) {
-            columns = new ArrayList<>();
-            for (Object c : (List<Object>) colsObj) {
-                if (c != null) columns.add(c.toString());
-            }
-        } else {
-            columns = java.util.Collections.emptyList();
-        }
+        String pattern = req.pattern;
+        ParsedTableName parsedTable = req.table;
+        List<String> columns = req.columns;
+        String filterColumn = req.filterColumn;
+        Object filterValue = req.filterValue;
+        List<Object> filterValues = req.filterValues;
+        boolean excludeTombstoned = req.excludeTombstoned;
+        boolean keysetMode = req.keysetMode;
+        String keysetField = req.keysetField;
+        Object keysetValue = req.keysetValue;
+        int effectiveLimit = req.effectiveLimit;
+        List<WhereCond> whereConds = req.whereConds;
 
         try (Connection conn = ds.getConnection()) {
-            // Build the validation column list: projection cols
-            // (skipped for count) + tombstoned_at when exclude_tombstoned
-            // + keyset_field when in keyset mode.
-            List<String> colsToValidate;
-            if ("count".equals(pattern) && !excludeTombstoned && !keysetMode
-                && whereConds.isEmpty()) {
-                colsToValidate = null;  // skip per-column check
-            } else {
-                List<String> cv = new ArrayList<>();
-                if (!"count".equals(pattern)) cv.addAll(columns);
-                if (excludeTombstoned) cv.add("tombstoned_at");
-                if (keysetMode) cv.add(keysetField);
-                // ADR-077 — predicate columns must exist before we quote
-                // them into the WHERE clause.
-                for (WhereCond c : whereConds) cv.add(c.column);
-                colsToValidate = cv.isEmpty() ? null : cv;
-            }
+            List<String> colsToValidate = req.columnsToValidate();
             String validationError = validateTableAndColumns(
                 conn, parsedTable, colsToValidate, filterColumn);
             if (validationError != null) {
                 return errorResult(start, "query", validationError);
             }
 
-            // Type-supported gate on filter values + keyset_value.
-            String typeError;
-            if ("by_ids".equals(pattern)) {
-                typeError = validateValueTypes(filterValues, null);
-            } else if (filterValue != null) {
-                typeError = validateValueTypes(
-                    java.util.Collections.emptyList(), filterValue);
-            } else {
-                typeError = null;
-            }
-            if (typeError == null && keysetMode && keysetValue != null) {
-                // Use the where_value slot (label="where_value") to surface
-                // a clean diagnostic; the JSONB/array rejection set is
-                // the same for keyset_value as for any other bound value.
-                typeError = validateValueTypes(
-                    java.util.Collections.emptyList(), keysetValue);
-            }
-            if (typeError == null && !whereConds.isEmpty()) {
-                // ADR-077 — type-gate the flattened predicate binds (the
-                // same JSONB/array rejection set as filter/keyset values).
-                typeError = validateValueTypes(
-                    collectWhereBinds(whereConds), null);
-            }
+            String typeError = req.valueTypeError();
             if (typeError != null) {
                 return errorResult(start, "query", typeError);
             }

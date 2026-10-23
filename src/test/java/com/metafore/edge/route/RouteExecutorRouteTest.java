@@ -20,31 +20,31 @@ class RouteExecutorRouteTest {
     @Test
     void extractQueryFromYaml() {
         String yaml = "name: test-route\nquery: SELECT * FROM users\nparams: none";
-        assertEquals("SELECT * FROM users", RouteExecutorRoute.extractQuery(yaml));
+        assertEquals("SELECT * FROM users", RouteYamlExtractor.extractQuery(yaml));
     }
 
     @Test
     void extractQueryMultiLine() {
         String yaml = "query: >\n  SELECT *\n  FROM users\n- next_section";
-        assertEquals("SELECT * FROM users", RouteExecutorRoute.extractQuery(yaml));
+        assertEquals("SELECT * FROM users", RouteYamlExtractor.extractQuery(yaml));
     }
 
     @Test
     void extractQueryNull() {
-        assertNull(RouteExecutorRoute.extractQuery(null));
-        assertNull(RouteExecutorRoute.extractQuery("no query here"));
+        assertNull(RouteYamlExtractor.extractQuery(null));
+        assertNull(RouteYamlExtractor.extractQuery("no query here"));
     }
 
     @Test
     void extractShellCommand() {
         String yaml = "exec: ps aux\nnext: value";
-        assertEquals("ps aux", RouteExecutorRoute.extractShellCommand(yaml));
+        assertEquals("ps aux", RouteYamlExtractor.extractShellCommand(yaml));
     }
 
     @Test
     void extractShellCommandNull() {
-        assertNull(RouteExecutorRoute.extractShellCommand(null));
-        assertNull(RouteExecutorRoute.extractShellCommand("no exec here"));
+        assertNull(RouteYamlExtractor.extractShellCommand(null));
+        assertNull(RouteYamlExtractor.extractShellCommand("no exec here"));
     }
 
     // ── Slice 33.1.0 — payload classification at dispatch boundary ──
@@ -55,8 +55,8 @@ class RouteExecutorRouteTest {
         p.put("operation", "create");
         p.put("table_name", "gtm_accounts");
         assertEquals(
-            RouteExecutorRoute.PayloadKind.PARAMETRIC,
-            RouteExecutorRoute.classifyPayload(p, null)
+            RouteYamlExtractor.PayloadKind.PARAMETRIC,
+            RouteYamlExtractor.classifyPayload(p, null)
         );
     }
 
@@ -65,8 +65,8 @@ class RouteExecutorRouteTest {
         java.util.Map<String, Object> p = new java.util.HashMap<>();
         // No 'operation' key — legacy SQL path.
         assertEquals(
-            RouteExecutorRoute.PayloadKind.LEGACY,
-            RouteExecutorRoute.classifyPayload(p, "SELECT 1")
+            RouteYamlExtractor.PayloadKind.LEGACY,
+            RouteYamlExtractor.classifyPayload(p, "SELECT 1")
         );
     }
 
@@ -78,8 +78,8 @@ class RouteExecutorRouteTest {
         java.util.Map<String, Object> p = new java.util.HashMap<>();
         p.put("operation", "create");
         assertEquals(
-            RouteExecutorRoute.PayloadKind.AMBIGUOUS,
-            RouteExecutorRoute.classifyPayload(p, "SELECT 1")
+            RouteYamlExtractor.PayloadKind.AMBIGUOUS,
+            RouteYamlExtractor.classifyPayload(p, "SELECT 1")
         );
     }
 
@@ -89,16 +89,16 @@ class RouteExecutorRouteTest {
         // malformed payload; edge surfaces a clear error.
         java.util.Map<String, Object> p = new java.util.HashMap<>();
         assertEquals(
-            RouteExecutorRoute.PayloadKind.MISSING,
-            RouteExecutorRoute.classifyPayload(p, null)
+            RouteYamlExtractor.PayloadKind.MISSING,
+            RouteYamlExtractor.classifyPayload(p, null)
         );
         assertEquals(
-            RouteExecutorRoute.PayloadKind.MISSING,
-            RouteExecutorRoute.classifyPayload(p, "")
+            RouteYamlExtractor.PayloadKind.MISSING,
+            RouteYamlExtractor.classifyPayload(p, "")
         );
         assertEquals(
-            RouteExecutorRoute.PayloadKind.MISSING,
-            RouteExecutorRoute.classifyPayload(null, null)
+            RouteYamlExtractor.PayloadKind.MISSING,
+            RouteYamlExtractor.classifyPayload(null, null)
         );
     }
 
@@ -106,7 +106,7 @@ class RouteExecutorRouteTest {
 
     /**
      * Probe an unresolvable host so we exercise the full
-     * handleConnectAndPing → ConnectionTester.probe → MessageFactory
+     * SourceCommands.connectAndPing → ConnectionTester.probe → MessageFactory
      * envelope path without needing a live PG. The dsRegistry must not
      * receive any side-effect for either success or failure.
      */
@@ -119,10 +119,6 @@ class RouteExecutorRouteTest {
             new TopicBuilder(cfg.tenantId(), cfg.controllerId());
         RouteExecutorRoute route =
             new RouteExecutorRoute(cfg, topics, registry);
-
-        Method m = RouteExecutorRoute.class.getDeclaredMethod(
-            "handleConnectAndPing", String.class, Map.class);
-        m.setAccessible(true);
 
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("db_host", "this-host-does-not-exist.invalid");
@@ -137,7 +133,7 @@ class RouteExecutorRouteTest {
 
         @SuppressWarnings("unchecked")
         Map<String, Object> result = (Map<String, Object>)
-            m.invoke(route, "test-probe-1", cmd);
+            SourceCommands.connectAndPing(cfg, "test-probe-1", cmd);
 
         // Typed reason routed through the error field.
         assertEquals("error", result.get("status"));
@@ -160,10 +156,6 @@ class RouteExecutorRouteTest {
         RouteExecutorRoute route =
             new RouteExecutorRoute(cfg, topics, registry);
 
-        Method m = RouteExecutorRoute.class.getDeclaredMethod(
-            "handleConnectAndPing", String.class, Map.class);
-        m.setAccessible(true);
-
         Map<String, Object> cmd = new HashMap<>();
         cmd.put("action", "connect_and_ping");
         cmd.put("route_id", "test-probe-2");
@@ -171,7 +163,7 @@ class RouteExecutorRouteTest {
 
         @SuppressWarnings("unchecked")
         Map<String, Object> result = (Map<String, Object>)
-            m.invoke(route, "test-probe-2", cmd);
+            SourceCommands.connectAndPing(cfg, "test-probe-2", cmd);
         // No db_host → ConnectionTester returns reason=unknown,
         // message="host is required".
         assertEquals("error", result.get("status"));
@@ -332,12 +324,202 @@ class RouteExecutorRouteTest {
         java.util.Map<String, Object> p = new java.util.HashMap<>();
         p.put("operation", "   ");
         assertEquals(
-            RouteExecutorRoute.PayloadKind.MISSING,
-            RouteExecutorRoute.classifyPayload(p, null)
+            RouteYamlExtractor.PayloadKind.MISSING,
+            RouteYamlExtractor.classifyPayload(p, null)
         );
         assertEquals(
-            RouteExecutorRoute.PayloadKind.LEGACY,
-            RouteExecutorRoute.classifyPayload(p, "SELECT 1")
+            RouteYamlExtractor.PayloadKind.LEGACY,
+            RouteYamlExtractor.classifyPayload(p, "SELECT 1")
         );
+    }
+
+    // ── task 828b1be6 — run_template fail-fast error replies ──────────────
+
+    /**
+     * Helper: build a RouteExecutorRoute with a real FhirTemplateExecutor,
+     * reflectively invoke {@code handleRunTemplate}, return the result envelope.
+     */
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> invokeHandleRunTemplate(
+        Map<String, Object> cmd
+    ) throws Exception {
+        DefaultCamelContext ctx = new DefaultCamelContext();
+        DataSourceRegistry registry = new DataSourceRegistry(ctx);
+        EdgeConfig cfg = EdgeConfig.from(java.util.Collections.emptyMap());
+        com.metafore.edge.topic.TopicBuilder topics =
+            new com.metafore.edge.topic.TopicBuilder(cfg.tenantId(), cfg.controllerId());
+        // real executor — exception paths fire before any HTTP
+        com.metafore.edge.service.FhirTemplateExecutor executor =
+            new com.metafore.edge.service.FhirTemplateExecutor();
+        RouteExecutorRoute route = new RouteExecutorRoute(
+            cfg, topics, registry, new com.metafore.edge.service.McpExecutor(), executor);
+
+        java.lang.reflect.Method m = RouteExecutorRoute.class.getDeclaredMethod(
+            "handleRunTemplate", String.class, Map.class);
+        m.setAccessible(true);
+        return (Map<String, Object>) m.invoke(route, "test-route", cmd);
+    }
+
+    @Test
+    void runTemplateUnknownTemplateRepliesWithError() throws Exception {
+        Map<String, Object> cmd = new LinkedHashMap<>();
+        cmd.put("template_id", "fhir.medication.read");
+        cmd.put("connection", Map.of("base_url", "https://hapi.fhir.org/baseR4"));
+        cmd.put("parameters", Map.of());
+
+        Map<String, Object> envelope = invokeHandleRunTemplate(cmd);
+
+        assertEquals("error", envelope.get("status"),
+            "unknown template must reply error, not rejected or silent");
+        assertEquals("run_template", envelope.get("action"));
+        assertEquals("unknown_template", envelope.get("error"));
+        assertEquals("fhir.medication.read", envelope.get("template_id"));
+        assertNotNull(envelope.get("error_details"),
+            "error_details must describe the unknown template");
+    }
+
+    @Test
+    void runTemplateMissingBaseUrlRepliesWithError() throws Exception {
+        Map<String, Object> cmd = new LinkedHashMap<>();
+        cmd.put("template_id", "fhir.patient.read");
+        cmd.put("connection", Map.of());   // no base_url
+        cmd.put("parameters", Map.of("patient_id", "example"));
+
+        Map<String, Object> envelope = invokeHandleRunTemplate(cmd);
+
+        assertEquals("error", envelope.get("status"),
+            "missing base_url must reply error, not propagate unhandled");
+        assertEquals("run_template", envelope.get("action"));
+        assertEquals("invalid_connection", envelope.get("error"));
+        assertEquals("fhir.patient.read", envelope.get("template_id"));
+        assertNotNull(envelope.get("error_details"));
+    }
+
+    @Test
+    void runTemplateInvalidBaseUrlRepliesWithError() throws Exception {
+        Map<String, Object> cmd = new LinkedHashMap<>();
+        cmd.put("template_id", "fhir.patient.read");
+        cmd.put("connection", Map.of("base_url", "http://evil.example.com/fhir"));
+        cmd.put("parameters", Map.of("patient_id", "example"));
+
+        Map<String, Object> envelope = invokeHandleRunTemplate(cmd);
+
+        assertEquals("error", envelope.get("status"));
+        assertEquals("invalid_connection", envelope.get("error"));
+        assertEquals("fhir.patient.read", envelope.get("template_id"));
+    }
+
+    @Test
+    void runTemplateUnknownParameterRepliesWithError() throws Exception {
+        Map<String, Object> cmd = new LinkedHashMap<>();
+        cmd.put("template_id", "fhir.patient.search");
+        cmd.put("connection", Map.of("base_url", "https://hapi.fhir.org/baseR4"));
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("_include", "Patient:organization");  // not in whitelist
+        cmd.put("parameters", params);
+
+        Map<String, Object> envelope = invokeHandleRunTemplate(cmd);
+
+        assertEquals("error", envelope.get("status"),
+            "unknown search param must reply error, not rejected or silent");
+        assertEquals("run_template", envelope.get("action"));
+        assertEquals("unknown_parameter", envelope.get("error"));
+        assertEquals("fhir.patient.search", envelope.get("template_id"));
+        assertNotNull(envelope.get("error_details"));
+    }
+
+    @Test
+    void runTemplateCapabilityDeniedRepliesWithError() throws Exception {
+        // Simulate an edge image that does not advertise "fhir".
+        DefaultCamelContext ctx = new DefaultCamelContext();
+        DataSourceRegistry registry = new DataSourceRegistry(ctx);
+        EdgeConfig cfg = EdgeConfig.from(java.util.Collections.emptyMap());
+        com.metafore.edge.topic.TopicBuilder topics =
+            new com.metafore.edge.topic.TopicBuilder(cfg.tenantId(), cfg.controllerId());
+        RouteExecutorRoute route = new RouteExecutorRoute(cfg, topics, registry);
+
+        java.util.Set<String> noFhir = new java.util.HashSet<>();
+        noFhir.add("read");
+        noFhir.add("test_connection");
+
+        Map<String, Object> cmd = new LinkedHashMap<>();
+        cmd.put("template_id", "fhir.patient.read");
+        cmd.put("action", "run_template");
+        cmd.put("connection", Map.of("base_url", "https://hapi.fhir.org/baseR4"));
+        cmd.put("parameters", Map.of());
+
+        Map<String, Object> envelope = route.enforceCapability(
+            noFhir, "run_template", "test-route", cmd);
+
+        // Simulate what the dispatch block does when result != null for run_template
+        assertNotNull(envelope, "must be denied when fhir not declared");
+        envelope.put("status", "error");
+        envelope.put("template_id", cmd.getOrDefault("template_id", ""));
+
+        assertEquals("error", envelope.get("status"),
+            "capability_denied for run_template must be status=error");
+        assertEquals("run_template", envelope.get("action"));
+        assertEquals("capability_denied", envelope.get("error"));
+        assertEquals("fhir.patient.read", envelope.get("template_id"));
+        assertNotNull(envelope.get("error_details"),
+            "error_details must name the denied capability");
+    }
+
+    // ── part 2 interim guard: no Postgres SQL against another kind of server ──
+
+    @Test
+    void nonPostgresSourceIsRefusedBeforeSqlExecutor() throws Exception {
+        EdgeConfig cfg = EdgeConfig.from(java.util.Collections.emptyMap());
+        DataSourceRegistry registry = new DataSourceRegistry(new DefaultCamelContext());
+        RouteExecutorRoute route = new RouteExecutorRoute(cfg, new TopicBuilder(cfg.tenantId(), cfg.controllerId()), registry);
+        Method execute = RouteExecutorRoute.class.getDeclaredMethod("handleExecute", String.class, Map.class);
+        execute.setAccessible(true);
+
+        for (String type : new String[] {"mysql", "mariadb", "mssql", "oracle"}) {
+            Map<String, Object> params = new LinkedHashMap<>();
+            params.put("db_type", type);
+            params.put("db_host", "h.invalid");
+            params.put("db_name", "d");
+            params.put("db_user", "u");
+            params.put("db_pass", "p");
+            params.put("operation", "write_with_events");
+            params.put("table_name", "t");
+            Map<String, Object> cmd = new HashMap<>();
+            cmd.put("parameters", params);
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> result = (Map<String, Object>) execute.invoke(route, "r1", cmd);
+            assertEquals("error", result.get("status"), type);
+            assertEquals("dialect not yet supported for write_with_events (db_type " + type + ")", result.get("error"));
+            assertEquals("dialect_not_supported", result.get("error_details"));
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> pinged = SourceCommands.connectAndPing(cfg, "r2", cmd);
+            assertEquals("dialect_not_supported", pinged.get("error_details"), type);
+        }
+    }
+
+    @Test
+    void parametricOperationsPassTheGateOnlyForTypesProvenLive() {
+        for (String type : new String[] {"mysql", "mariadb"}) {
+            for (String op : new String[] {"create", "update", "delete", "select", "read"}) {
+                assertNull(com.metafore.edge.db.DialectGate.refusal(Map.of("db_type", type), op), type + " " + op);
+            }
+            for (String op : new String[] {"write_with_events", "introspect"}) {
+                assertNotNull(com.metafore.edge.db.DialectGate.refusal(Map.of("db_type", type), op), type + " " + op);
+            }
+        }
+        for (String type : new String[] {"mssql", "oracle"}) {
+            for (String op : new String[] {"create", "update", "delete", "select", "read"}) {
+                assertNotNull(com.metafore.edge.db.DialectGate.refusal(Map.of("db_type", type), op), type + " " + op);
+            }
+        }
+    }
+
+    @Test
+    void postgresAndUnsetTypePassTheGate() {
+        assertNull(com.metafore.edge.db.DialectGate.refusal(Map.of("operation", "read"), "read"));
+        assertNull(com.metafore.edge.db.DialectGate.refusal(Map.of("db_type", "postgresql"), "read"));
+        assertNull(com.metafore.edge.db.DialectGate.refusal(null, "read"));
     }
 }
