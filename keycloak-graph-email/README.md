@@ -73,12 +73,14 @@ to avoid a startup failure.
 
 ## Build and publish
 
-GitHub Actions workflow `keycloak-graph-email.yml` is path-filtered to
-`keycloak-graph-email/**` and only pushes on `main` when
-`vars.EDGE_PUBLISH_ENABLED == 'true'`. It pushes a SHA-tagged image to
+The image is built in `development.yml`'s `publish` job, which runs on
+push to `development` after all other jobs pass. It is gated on
+`vars.KC_PUBLISH_ENABLED == 'true'` (set this variable on the repo to
+enable). It pushes a SHA-tagged image to
 `359469026479.dkr.ecr.us-east-1.amazonaws.com/metafore-dev/keycloak`
 using the OIDC role `vars.EDGE_PUBLISH_ROLE_ARN`. Tags are immutable;
-the chart pins by digest.
+the chart pins by digest. The pushed digest is printed to the publish
+job's step summary.
 
 ## Upgrading Keycloak
 

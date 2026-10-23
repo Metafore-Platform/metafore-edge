@@ -119,6 +119,18 @@ class GuardTest(unittest.TestCase):
     def test_the_named_publish_job_may_hold_credentials_and_push(self):
         self.assertEqual([], run(development_yml=OWN_PUBLISH))
 
+    def test_the_publish_job_may_push_keycloak_alongside_edge(self):
+        # PUBLISH_OTHER_REPO allows metafore-dev/keycloak (the KC Graph Email SPI image, task 82655925).
+        kc_steps = (
+            "      - run: aws ecr describe-images --repository-name metafore-dev/keycloak --image-ids imageTag=\"$SHA\"\n"
+            "      - run: docker push \"$REGISTRY/keycloak:$SHA\"\n"
+        )
+        self.assertEqual([], run(development_yml=OWN_PUBLISH + kc_steps))
+        for other in ("metafore-dev/worker", "metafore-dev/api", "metafore-dev/web"):
+            with self.subTest(repo=other):
+                other_step = f"      - run: aws ecr describe-images --repository-name {other}\n"
+                self.assertTrue(run(development_yml=OWN_PUBLISH + other_step), other)
+
     def test_a_publish_job_is_still_not_allowed_to_reach_a_cluster_or_another_registry(self):
         for bad in ("      - run: kubectl rollout restart deployment/x\n", "      - run: helm upgrade a b\n",
                     "      - run: argocd app sync a\n", "      - uses: docker/login-action@v3\n",
