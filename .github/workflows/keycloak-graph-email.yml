@@ -2,7 +2,7 @@ name: keycloak-graph-email
 
 on:
   push:
-    branches: [main]
+    branches: [development]
     paths: ['keycloak-graph-email/**']
   pull_request:
     paths: ['keycloak-graph-email/**']
@@ -26,7 +26,7 @@ jobs:
 
   build-and-push:
     needs: test
-    if: github.ref == 'refs/heads/main' && vars.EDGE_PUBLISH_ENABLED == 'true'
+    if: github.ref == 'refs/heads/development' && vars.EDGE_PUBLISH_ENABLED == 'true'
     runs-on: ubuntu-latest
     permissions:
       id-token: write
