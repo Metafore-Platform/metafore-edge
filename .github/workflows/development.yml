@@ -311,3 +311,35 @@ jobs:
             sleep $((attempt * 5))
           done
           echo "::error::could not push the pin to metafore-deploy"; exit 1
+
+      # Keycloak Graph Email SPI image (task 82655925): quay.io/keycloak/keycloak:26.1 + the graph-email JAR,
+      # pushed to metafore-dev/keycloak. Gated on KC_PUBLISH_ENABLED. The SHA-tagged digest prints to the step
+      # summary — paste it into metafore-deploy envs/staging/values.yaml keycloak.graphEmail.image.digest.
+      - name: Set up JDK 21 (KC image build)
+        if: vars.KC_PUBLISH_ENABLED == 'true'
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Build Keycloak Graph Email JAR
+        if: vars.KC_PUBLISH_ENABLED == 'true'
+        working-directory: keycloak-graph-email
+        run: mvn package -B -DskipTests
+
+      - name: Build and push Keycloak image
+        if: vars.KC_PUBLISH_ENABLED == 'true'
+        run: |
+          if aws ecr describe-images --repository-name metafore-dev/keycloak --image-ids imageTag="$SHA" >/dev/null 2>&1; then
+            echo "metafore-dev/keycloak:$SHA already built"
+          else
+            docker build \
+              --label org.opencontainers.image.revision="$SHA" \
+              --label org.opencontainers.image.source="https://github.com/$GITHUB_REPOSITORY" \
+              -t "$REGISTRY/keycloak:$SHA" keycloak-graph-email/
+            docker push "$REGISTRY/keycloak:$SHA"
+          fi
+          KC_DIGEST=$(aws ecr describe-images --repository-name metafore-dev/keycloak \
+            --image-ids imageTag="$SHA" --query 'imageDetails[0].imageDigest' --output text)
+          echo "### KC image \`metafore-dev/keycloak:$SHA@$KC_DIGEST\`" >> "$GITHUB_STEP_SUMMARY"

@@ -11,8 +11,8 @@ metafore-edge's `main` deploys to production, `staging` to the staging cluster a
 * does it carry anything that deploys (AWS credentials or ECR, kubectl, helm, a docker push, Argo CD)?
 
 A workflow that does both fails the check. `development.yml` must in addition ask for nothing but `contents: read`, with ONE
-exception (Compass a3990b6e): its job named `publish` may take the OIDC token and push the commit's image to the ECR repository
-`metafore-dev/edge` and pin it in metafore-deploy. That job is held to: a push to `development` only, after every other job of the
+exception (Compass a3990b6e): its job named `publish` may take the OIDC token and push the commit's image to the ECR repositories
+`metafore-dev/edge` and `metafore-dev/keycloak` and pin the edge in metafore-deploy. That job is held to: a push to `development` only, after every other job of the
 file, in the `development` environment, with `contents: read` and `id-token: write` and nothing more, and no cluster, Helm, Argo CD,
 GHCR, staging or production reference; `development.yml` itself can only be started by a push or a pull request.
 
@@ -43,8 +43,8 @@ IMAGE_FORBIDDEN = re.compile(
     r"docker/login-action|\bargocd\b|ghcr\.io|metafore-ilan|metafore-staging|\beks\b", re.IGNORECASE)
 PUBLISH_FORBIDDEN = re.compile(
     r"\bkubectl\b|\bhelm\b|azure/setup-helm|docker/login-action|\bargocd\b|ghcr\.io|metafore-ilan|metafore-staging|\beks\b", re.IGNORECASE)
-#: any ECR repository of the development account other than the edge's (images and charts), and any image under $REGISTRY but the edge's
-PUBLISH_OTHER_REPO = re.compile(r"metafore-dev/(?!edge\b)|\$\{?REGISTRY\}?/(?!edge[:\"'\s]|edge$)")
+#: any ECR repository of the development account other than the edge's or keycloak's, and any image under $REGISTRY but those
+PUBLISH_OTHER_REPO = re.compile(r"metafore-dev/(?!edge\b|keycloak\b)|\$\{?REGISTRY\}?/(?!edge\b|keycloak\b)")
 #: anything that deploys or reaches a cluster or registry
 DEPLOY_MARKERS = re.compile(
     r"aws-actions/|configure-aws-credentials|amazon-ecr|\bkubectl\b|\bhelm\b|azure/setup-helm|docker/login-action|"
@@ -161,7 +161,7 @@ def publish_problems(workflow: dict) -> list[str]:
     if forbidden:
         bad.append(f"job {PUBLISH_JOB}: it may push the edge image to ECR and pin it, nothing else, but it names {forbidden}")
     if PUBLISH_OTHER_REPO.search(text):
-        bad.append(f"job {PUBLISH_JOB}: it may push only to the ECR repository metafore-dev/edge")
+        bad.append(f"job {PUBLISH_JOB}: it may push only to metafore-dev/edge or metafore-dev/keycloak")
     return bad
 
 

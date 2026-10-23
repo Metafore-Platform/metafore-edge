@@ -21,7 +21,7 @@ jobs:
 DEPLOY_STEP = "      - run: kubectl set image deployment/x x=y\n"
 
 #: development.yml with the one job that may publish (Compass a3990b6e): after every other job, on a push to development only,
-#: in the development environment, with the OIDC token and nothing else, to the one ECR repository `metafore-dev/edge`.
+#: in the development environment, with the OIDC token and nothing else, to metafore-dev/edge and metafore-dev/keycloak.
 OWN_PUBLISH = """
 name: development
 on:
