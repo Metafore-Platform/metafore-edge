@@ -16,7 +16,7 @@ import java.util.Set;
  * {@code KNOWN_AC_CAPABILITIES} (see {@code metafore_core/mqtt.py}):
  * {@code read} / {@code write} / {@code ddl} / {@code introspect} /
  * {@code test_connection} / {@code healthcheck} / {@code shell} /
- * {@code sync}.
+ * {@code sync}. The edge no longer serves {@code shell} (Compass 3bb6be4e).
  *
  * <p>This image declares the subset it actually serves. The dispatcher
  * enforces against the same constant — so an edge image that ships a
@@ -39,7 +39,6 @@ public final class Capabilities {
     /** Canonical capability names this edge image advertises + enforces. */
     public static final Set<String> DECLARED = Collections.unmodifiableSet(
         new LinkedHashSet<>(Arrays.asList(
-            "shell",
             "test_connection",
             "healthcheck",
             "introspect",
@@ -70,9 +69,6 @@ public final class Capabilities {
      *       DataSourceRegistry)</li>
      *   <li>{@code deploy} / {@code execute}:
      *     <ul>
-     *       <li>shell branch (params has {@code shell_command} or
-     *           {@code route_yaml} contains {@code exec:}) →
-     *           {@code shell}</li>
      *       <li>parametric {@code operation in {read, select}} →
      *           {@code read}</li>
      *       <li>parametric {@code operation in {create, update, delete}}
@@ -112,19 +108,11 @@ public final class Capabilities {
     private static String deriveForExecute(Map<String, Object> params) {
         if (params != null) {
             // adr-158 — MCP transport is keyed on mcp_tool presence and
-            // takes precedence over the SQL/shell classification (an MCP
-            // command carries neither shell_command nor operation).
+            // takes precedence over the SQL classification (an MCP
+            // command carries no operation).
             Object mcpTool = params.get("mcp_tool");
             if (mcpTool instanceof String && !((String) mcpTool).isBlank()) {
                 return "mcp";
-            }
-            Object shellCmd = params.get("shell_command");
-            if (shellCmd instanceof String && !((String) shellCmd).isBlank()) {
-                return "shell";
-            }
-            Object yaml = params.get("route_yaml");
-            if (yaml instanceof String && ((String) yaml).contains("exec:")) {
-                return "shell";
             }
             Object op = params.get("operation");
             if (op instanceof String) {

@@ -18,7 +18,7 @@ For POC/cloud deployments, Access Controllers run in Docker with a co-located Po
 - **6 routes:** RegistrationRoute (one-shot), HeartbeatRoute (30s timer), DiscoveryRoute (startup + on-demand), RouteExecutorRoute (control/routes listener), RestAdapterRoute (control/write-back listener), EventRoute (log file watcher).
 - **Connectors in code:** PostgreSQL only (via `PGSimpleDataSource` + `org.postgresql:postgresql:42.7.4`). Registration schema *enum* allows `mariadb`/`oracle`/etc. but code does NOT implement them — aspirational, not live.
 - **MariaDB is dead** per infra CLAUDE.md. Don't add it.
-- **Security whitelists:** SqlExecutor (SELECT, SHOW, CREATE INDEX, CREATE TABLE, DELETE FROM, UPDATE, INSERT INTO), ShellExecutor (systemctl, ps, df, ss, cat, wc) — block injection chars `[;|&`$()]`.
+- **Security whitelists:** SqlExecutor (SELECT, SHOW, CREATE INDEX, CREATE TABLE, DELETE FROM, UPDATE, INSERT INTO). **No shell path:** a route command that carries `shell_command` is refused (`shell_not_supported`) and logged; the edge does not run shell commands (Compass 3bb6be4e).
 - **Sync loop: NONE.** Edge is request-response only. Core sends route commands via MQTT → edge executes → edge publishes result. The only proactive feature is log file tailing (`EventRoute`). There is no CDC, no polling of source DBs, no push-based sync.
 
 ## Known Issues
@@ -33,7 +33,7 @@ For POC/cloud deployments, Access Controllers run in Docker with a co-located Po
 A working Access Controller exists in `C:\metafore-poc\metafore-conduit\`. Key files:
 - `MetaforeConduit.java` — 5 Camel routes: log tail, heartbeat, startup discovery, on-demand discovery, route executor
 - `Dockerfile` — Multi-stage build (Maven → JRE 21 slim)
-- Routes execute SQL via JDBC, shell commands via ProcessBuilder, and publish results to MQTT
+- Routes execute SQL via JDBC and publish results to MQTT (the reference implementation also ran shell commands; this edge does not)
 
 ## Architecture
 ```

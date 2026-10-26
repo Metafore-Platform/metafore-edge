@@ -35,18 +35,6 @@ class RouteExecutorRouteTest {
         assertNull(RouteYamlExtractor.extractQuery("no query here"));
     }
 
-    @Test
-    void extractShellCommand() {
-        String yaml = "exec: ps aux\nnext: value";
-        assertEquals("ps aux", RouteYamlExtractor.extractShellCommand(yaml));
-    }
-
-    @Test
-    void extractShellCommandNull() {
-        assertNull(RouteYamlExtractor.extractShellCommand(null));
-        assertNull(RouteYamlExtractor.extractShellCommand("no exec here"));
-    }
-
     // ── Slice 33.1.0 — payload classification at dispatch boundary ──
 
     @Test

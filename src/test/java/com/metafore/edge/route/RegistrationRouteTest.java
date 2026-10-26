@@ -57,7 +57,8 @@ class RegistrationRouteTest extends CamelTestSupport {
         List<?> caps = (List<?>) msg.get("capabilities");
         // CCA.T2 / compass ba53231a — canonical capability names
         // (replaces legacy [shell] + [jdbc] advertisement).
-        assertTrue(caps.contains("shell"));
+        // Compass 3bb6be4e — the edge has no shell path, so it does not advertise one.
+        assertFalse(caps.contains("shell"));
         assertTrue(caps.contains("test_connection"),
             "CCA.T2 — edge must advertise test_connection so the "
             + "platform preflight can route connect_and_ping commands");

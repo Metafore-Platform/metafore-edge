@@ -53,12 +53,4 @@ final class RouteYamlExtractor {
         }
         return sb.toString().trim();
     }
-
-    static String extractShellCommand(String routeYaml) {
-        if (routeYaml == null) return null;
-        int idx = routeYaml.indexOf("exec:");
-        if (idx < 0) return null;
-        String after = routeYaml.substring(idx + 5).trim();
-        return after.split("\n")[0].trim();
-    }
 }

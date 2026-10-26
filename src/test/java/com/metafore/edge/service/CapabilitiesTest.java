@@ -17,7 +17,8 @@ class CapabilitiesTest {
     void declaredSetCoversEveryCanonicalNameThisEdgeServes() {
         // Matches metafore-core's KNOWN_AC_CAPABILITIES minus 'sync'
         // (Equilibrium method E sync is platform-side, not on edge).
-        assertTrue(Capabilities.DECLARED.contains("shell"));
+        // Compass 3bb6be4e: the edge has no shell path, so it must not advertise one.
+        assertFalse(Capabilities.DECLARED.contains("shell"));
         assertTrue(Capabilities.DECLARED.contains("test_connection"));
         assertTrue(Capabilities.DECLARED.contains("healthcheck"));
         assertTrue(Capabilities.DECLARED.contains("introspect"));
@@ -123,26 +124,6 @@ class CapabilitiesTest {
     }
 
     @Test
-    void shellCommandMapsToShell() {
-        Map<String, Object> p = new HashMap<>();
-        p.put("shell_command", "df -h");
-        assertEquals(
-            "shell",
-            Capabilities.deriveRequiredCapability("execute", p)
-        );
-    }
-
-    @Test
-    void routeYamlWithExecMapsToShell() {
-        Map<String, Object> p = new HashMap<>();
-        p.put("route_yaml", "name: t\nexec: ps aux\n");
-        assertEquals(
-            "shell",
-            Capabilities.deriveRequiredCapability("execute", p)
-        );
-    }
-
-    @Test
     void legacySqlPathMapsToWrite() {
         // Coarse upper-bound: legacy SQL execute without an 'operation'
         // field could be SELECT or INSERT — capability-level enforcement
@@ -161,13 +142,15 @@ class CapabilitiesTest {
     }
 
     @Test
-    void emptyOrBlankShellCommandFallsThroughToWrite() {
-        Map<String, Object> p = new HashMap<>();
-        p.put("shell_command", "   ");
-        assertEquals(
-            "write",
-            Capabilities.deriveRequiredCapability("execute", p)
-        );
+    void noActionMapsToTheRemovedShellCapability() {
+        // Compass 3bb6be4e: a shell_command is refused before capability enforcement (ShellRefusal), and the derivation
+        // never names 'shell' any more, whatever the parameters carry.
+        for (String action : java.util.List.of("execute", "deploy", "remove", "connect_and_ping", "run_template")) {
+            Map<String, Object> p = new HashMap<>();
+            p.put("shell_command", "df -h");
+            p.put("route_yaml", "name: t\nexec: ps aux\n");
+            assertNotEquals("shell", Capabilities.deriveRequiredCapability(action, p), action);
+        }
     }
 
     @Test
