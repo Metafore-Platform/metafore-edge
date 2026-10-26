@@ -102,12 +102,46 @@ public final class FhirTemplateExecutor {
     }
 
     /**
+     * Raised when the connection asks to authenticate (Compass 87bcb517). This controller reads only
+     * {@code connection.base_url}; it has no credential resolution, so a request for authentication is refused
+     * instead of being sent to the server without it.
+     */
+    public static class UnsupportedAuthException extends RuntimeException {
+        public UnsupportedAuthException(String message) {
+            super(message);
+        }
+    }
+
+    /**
+     * Fail closed: accept only {@code auth_mode} {@code none} (or absent) and no {@code credential_ref}. Any other
+     * value, of any type, and any credential_ref, is refused before a request is built. The credential_ref is a name
+     * the command chose, so it is never echoed; the mode is echoed only when it is a plain lower-case name.
+     */
+    static void requireNoAuth(Map<String, Object> connection) {
+        if (connection == null) {
+            return;
+        }
+        Object mode = connection.get("auth_mode");
+        boolean asksForMode = mode != null && !"none".equals(mode);
+        if (!asksForMode && connection.get("credential_ref") == null) {
+            return;
+        }
+        String shown = mode instanceof String s && s.matches("[a-z_]{1,32}") ? s : "<not a plain name>";
+        throw new UnsupportedAuthException(
+            (asksForMode ? "connection.auth_mode '" + shown + "'" : "connection.credential_ref")
+            + " is not supported: this controller cannot authenticate to a server yet, so a run_template that asks "
+            + "for authentication is refused rather than sent without it. Accepted: auth_mode 'none' or absent, "
+            + "and no credential_ref.");
+    }
+
+    /**
      * Execute a FHIR template. Returns a partial route-result map:
      * {@code {status, action, latency_ms, row_count, data}} on success or
      * {@code {status="error", action, latency_ms, error, error_details}} on failure.
      *
      * @throws UnknownTemplateException   templateId not in ALLOWED_TEMPLATES
      * @throws UnknownParameterException  a search param key not in SEARCH_PARAM_WHITELIST
+     * @throws UnsupportedAuthException   connection.auth_mode other than none, or a connection.credential_ref
      * @throws IllegalArgumentException   connection.base_url absent, blank, or fails validation
      */
     @SuppressWarnings("unchecked")
@@ -119,6 +153,7 @@ public final class FhirTemplateExecutor {
         if (!ALLOWED_TEMPLATES.contains(templateId)) {
             throw new UnknownTemplateException(templateId);
         }
+        requireNoAuth(connection);
         Object rawUrl = connection != null ? connection.get("base_url") : null;
         if (!(rawUrl instanceof String) || ((String) rawUrl).isBlank()) {
             throw new IllegalArgumentException(

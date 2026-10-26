@@ -469,6 +469,13 @@ public class RouteExecutorRoute extends RouteBuilder {
                 "unknown_parameter", e.getMessage());
             r.put("template_id", templateId);
             return r;
+        } catch (FhirTemplateExecutor.UnsupportedAuthException e) {
+            // Compass 87bcb517: a request for authentication is refused, never sent without it
+            Map<String, Object> r = MessageFactory.routeResult(config, routeId,
+                "error", "run_template", 0, null, null, null,
+                "unsupported_connection_auth", e.getMessage());
+            r.put("template_id", templateId);
+            return r;
         } catch (IllegalArgumentException e) {
             // missing / invalid connection.base_url
             Map<String, Object> r = MessageFactory.routeResult(config, routeId,
