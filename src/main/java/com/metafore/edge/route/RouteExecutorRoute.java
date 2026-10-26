@@ -12,7 +12,6 @@ import com.metafore.edge.service.DataSourceRegistry;
 import com.metafore.edge.service.FhirTemplateExecutor;
 import com.metafore.edge.service.ListReadExecutor;
 import com.metafore.edge.service.McpExecutor;
-import com.metafore.edge.service.ShellExecutor;
 import com.metafore.edge.service.SqlExecutor;
 import com.metafore.edge.topic.ReplyTopic;
 import com.metafore.edge.topic.TopicBuilder;
@@ -73,7 +72,11 @@ public class RouteExecutorRoute extends RouteBuilder {
                 // v2: the command's own reply topic, only when it is this edge's per-edge topic (topic/ReplyTopic)
                 exchange.setProperty("mfReplyTopic", ReplyTopic.forEdge(cmd.get("response_topic"), topics));
 
-                Map<String, Object> result = enforceCapability(action, routeId, cmd);
+                // Compass 3bb6be4e: the edge has no shell path; a command that carries shell_command is refused first.
+                Map<String, Object> result = ShellRefusal.check(config, action, routeId, cmd);
+                if (result == null) {
+                    result = enforceCapability(action, routeId, cmd);
+                }
                 if (result != null) {
                     // task 828b1be6: run_template must fail-fast with status=error
                     // (not rejected) and echo template_id so platform can correlate.
@@ -183,8 +186,8 @@ public class RouteExecutorRoute extends RouteBuilder {
         // adr-158 — MCP transport. Keyed on mcp_tool presence; executes a
         // JSON-RPC tool call against an MCP-native system with credentials
         // (mcp_token) local to the controller. Checked before the DB /
-        // shell / SQL branches because an MCP command carries none of
-        // db_host / shell_command / operation.
+        // SQL branches because an MCP command carries none of
+        // db_host / operation.
         if (McpExecutor.isMcpCommand(params)) {
             return executeMcp(routeId, params);
         }
@@ -193,16 +196,6 @@ public class RouteExecutorRoute extends RouteBuilder {
         Map<String, Object> refusedSource = SourceCommands.register(config, dsRegistry, routeId, params);
         if (refusedSource != null) {
             return refusedSource;
-        }
-
-        // Check for shell command
-        String shellCmd = params != null ? (String) params.get("shell_command") : null;
-        if (shellCmd == null && routeYaml != null && routeYaml.contains("exec:")) {
-            shellCmd = RouteYamlExtractor.extractShellCommand(routeYaml);
-        }
-
-        if (shellCmd != null && !shellCmd.isEmpty()) {
-            return executeShell(routeId, shellCmd);
         }
 
         // Slice 33.1.0 dispatch — parametric vs legacy SQL.
@@ -420,22 +413,6 @@ public class RouteExecutorRoute extends RouteBuilder {
         String errorDetails = (String) execResult.get("error_details");
         return MessageFactory.routeResult(config, routeId,
             status, action, latency, rowCount, null, data, error, errorDetails);
-    }
-
-    private Map<String, Object> executeShell(String routeId, String command) {
-        if (!ShellExecutor.isAllowed(command)) {
-            return MessageFactory.routeResult(config, routeId,
-                "rejected", "shell", 0, null, null, null,
-                "Command not in whitelist: " + command.split("\\s+")[0], null);
-        }
-        Map<String, Object> execResult = ShellExecutor.execute(command);
-        String status = (String) execResult.get("status");
-        long latency = ((Number) execResult.get("latency_ms")).longValue();
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> data = (List<Map<String, Object>>) execResult.get("data");
-        String error = (String) execResult.get("error");
-        return MessageFactory.routeResult(config, routeId,
-            status, "shell", latency, null, null, data, error, null);
     }
 
     // security(adr-096): the legacy executeSql(...) helper — which called
