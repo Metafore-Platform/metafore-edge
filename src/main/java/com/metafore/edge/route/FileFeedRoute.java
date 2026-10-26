@@ -1,5 +1,6 @@
 package com.metafore.edge.route;
 
+import com.metafore.edge.log.CommandLog;
 import com.metafore.edge.log.Redactor;
 import com.fasterxml.jackson.databind.MappingIterator;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -91,7 +92,7 @@ public class FileFeedRoute extends RouteBuilder {
         String feedId = String.valueOf(cmd.get("feed_id"));
         String uri = String.valueOf(cmd.get("uri"));
         if (feedId == null || feedId.isBlank() || uri == null || uri.isBlank()) {
-            LOG.warn("[file-feed] declaration missing feed_id or uri: {}", Redactor.map(cmd));
+            LOG.warn("[file-feed] declaration missing feed_id or uri (keys: {})", CommandLog.keys(cmd));
             return;
         }
         if (!uri.startsWith("file:") && !uri.startsWith("sftp:") && !uri.startsWith("ftp:")) {

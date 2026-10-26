@@ -122,7 +122,11 @@ class RedactorTest {
             assertFalse(part.contains(PASS), part);
             assertFalse(part.contains(USER), part);
         }
-        assertTrue(written.stream().anyMatch(p -> p.contains("db.internal")));
+        // Compass 03b23c26: the line names the command by its keys and carries no value at all, not even the host.
+        assertTrue(written.stream().anyMatch(p -> p.contains("db_host")));
+        for (String part : written) {
+            assertFalse(part.contains("db.internal"), part);
+        }
     }
 
     // ── nothing prints a whole command around the redactor ──────────
