@@ -28,7 +28,7 @@ import java.util.Map;
  * {@code contracts/mqtt/route_command.schema.json}):
  * <pre>{
  *   "mcp_server_url": "https://compass.example/mcp",  // http/sse transport
- *   "mcp_transport":  "http",                          // http|sse|stdio
+ *   "mcp_transport":  "http",                          // http|sse
  *   "mcp_tool":       "get_roadmap",
  *   "mcp_arguments":  { ... },
  *   "mcp_token":      "..."                             // optional bearer
@@ -105,10 +105,10 @@ public final class McpExecutor {
                 "Missing 'mcp_tool' in route parameters.");
         }
         if (!"http".equals(transport) && !"sse".equals(transport)) {
-            // stdio (local child-process MCP servers) is a planned
-            // second increment; fail honestly rather than silently.
+            // The controller starts no process for an MCP call (Compass 60bd46cd):
+            // only http and sse, whatever else a command names.
             return err(start, "unsupported_mcp_transport",
-                "MCP transport '" + transport + "' is not yet supported "
+                "MCP transport '" + transport + "' is not supported "
                 + "on this controller. Supported: http, sse.");
         }
 

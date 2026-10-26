@@ -236,15 +236,34 @@ class McpExecutorTest {
     }
 
     @Test
-    void stdioTransportRejectedForNow() {
+    void stdioTransportIsNotSupported() {
         Map<String, Object> p = mcpCmd("get_roadmap");
         p.put("mcp_transport", "stdio");
+        p.put("mcp_command", "touch /tmp/should-never-exist");
         ScriptedHttpClient client = new ScriptedHttpClient();
 
         Map<String, Object> r = new McpExecutor(client).execute(p);
 
         assertEquals("error", r.get("status"));
         assertEquals("unsupported_mcp_transport", r.get("error"));
+        String details = String.valueOf(r.get("error_details"));
+        assertTrue(details.contains("is not supported"), details);
+        assertFalse(details.contains("yet"), "no promise of a later stdio transport: " + details);
+        assertFalse(details.contains("should-never-exist"), "the command is never echoed: " + details);
+        assertEquals(0, client.sendCount());
+        assertFalse(new java.io.File("/tmp/should-never-exist").exists(), "no process was started");
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"STDIO", " stdio", "websocket", "grpc", ""})
+    void anyTransportButHttpAndSseIsRefusedWithoutAnyCall(String transport) {
+        Map<String, Object> p = mcpCmd("get_roadmap");
+        p.put("mcp_transport", transport);
+        ScriptedHttpClient client = new ScriptedHttpClient();
+
+        Map<String, Object> r = new McpExecutor(client).execute(p);
+
+        assertEquals("unsupported_mcp_transport", r.get("error"), transport);
         assertEquals(0, client.sendCount());
     }
 
