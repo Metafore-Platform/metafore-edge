@@ -3,7 +3,9 @@ package com.metafore.edge.route;
 import java.util.Map;
 
 /**
- * Static utilities for parsing and classifying route-command payloads.
+ * Static utilities for classifying route-command payloads. (It once also pulled a query out of a command's
+ * {@code route_yaml}; the edge loads no route code now, so a command carrying {@code route_yaml} is refused
+ * first, see {@link RouteYamlRefusal}.)
  * Extracted from {@link RouteExecutorRoute} to keep that class within
  * the project's 500-line limit as new actions are added.
  */
@@ -32,25 +34,5 @@ final class RouteYamlExtractor {
         if (hasOperation && hasSql) return PayloadKind.AMBIGUOUS;
         if (!hasOperation && !hasSql) return PayloadKind.MISSING;
         return hasOperation ? PayloadKind.PARAMETRIC : PayloadKind.LEGACY;
-    }
-
-    static String extractQuery(String routeYaml) {
-        if (routeYaml == null) return null;
-        int idx = routeYaml.indexOf("query:");
-        if (idx < 0) idx = routeYaml.indexOf("query :");
-        if (idx < 0) return null;
-        String after = routeYaml.substring(idx + 6).trim();
-        if (after.startsWith(">")) after = after.substring(1).trim();
-        StringBuilder sb = new StringBuilder();
-        for (String line : after.split("\n")) {
-            String trimmed = line.trim();
-            if (sb.length() > 0 && !trimmed.isEmpty()
-                && (trimmed.startsWith("-") || trimmed.contains(":"))) break;
-            if (!trimmed.isEmpty()) {
-                if (sb.length() > 0) sb.append(" ");
-                sb.append(trimmed);
-            }
-        }
-        return sb.toString().trim();
     }
 }

@@ -21,7 +21,6 @@
       "required": ["base_url"],
       "additionalProperties": false
     },
-    "route_yaml": { "type": "string", "description": "YAML route definition (for deploy)" },
     "parameters": {
       "type": "object",
       "description": "Route execution parameters including DB credentials, SQL, etc.",

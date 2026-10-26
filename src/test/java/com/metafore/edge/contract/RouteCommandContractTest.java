@@ -84,7 +84,6 @@ class RouteCommandContractTest {
 
     @ParameterizedTest
     @ValueSource(strings = {
-        "{\"action\":\"deploy\",\"route_id\":\"r-1\",\"route_yaml\":\"name: r\\nquery: SELECT 1\"}",
         "{\"action\":\"execute\",\"route_id\":\"r-1\",\"parameters\":{\"db_name\":\"d\",\"db_host\":\"h\",\"db_port\":5432,"
             + "\"db_user\":\"u\",\"db_pass\":\"p\",\"sql\":\"SELECT 1\"}}",
         "{\"action\":\"execute\",\"route_id\":\"r-1\",\"parameters\":{\"db_port\":\"5432\",\"operation\":\"read\","
@@ -120,6 +119,7 @@ class RouteCommandContractTest {
         "{\"action\":\"flush\",\"route_id\":\"r-1\"}",                                         // an action it does not know
         "{\"action\":\"execute\",\"route_id\":7}",                                             // route_id is a string
         "{\"action\":\"execute\",\"route_id\":\"r-1\",\"tenant_id\":\"t\"}",                   // a field it does not define
+        "{\"action\":\"deploy\",\"route_id\":\"r-1\",\"route_yaml\":\"name: r\"}",                  // route code is not sent (adr-060)
         "{\"action\":\"execute\",\"route_id\":\"r-1\",\"parameters\":{\"db_type\":\"sqlite\"}}",
         "{\"action\":\"execute\",\"route_id\":\"r-1\",\"parameters\":{\"http_method\":\"PATCH\"}}",
         "{\"action\":\"execute\",\"route_id\":\"r-1\",\"parameters\":{\"operation\":\"introspect\"}}",            // no 'introspect'
