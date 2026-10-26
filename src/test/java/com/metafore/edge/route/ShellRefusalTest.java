@@ -73,14 +73,11 @@ class ShellRefusalTest {
 
     @Test
     void anExecLineInTheRouteYamlRunsNothing() {
-        // The exec: fallback is gone: with no operation and no query the payload is MISSING, an error answer.
+        // The exec: fallback is gone, and so is route_yaml itself: the command is refused (RouteYamlRefusal).
         Map<String, Object> cmd = command("execute", new HashMap<>());
         cmd.put("route_yaml", "name: t\nexec: ps aux\n");
         assertNull(ShellRefusal.check(CFG, "execute", "ps-test", cmd));
-        String yaml = (String) cmd.get("route_yaml");
-        assertNull(RouteYamlExtractor.extractQuery(yaml));
-        assertEquals(RouteYamlExtractor.PayloadKind.MISSING,
-            RouteYamlExtractor.classifyPayload(new HashMap<>(), RouteYamlExtractor.extractQuery(yaml)));
+        assertNotNull(RouteYamlRefusal.check(CFG, "execute", "ps-test", cmd));
     }
 
     @Test

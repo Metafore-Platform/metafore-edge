@@ -84,7 +84,6 @@ class RouteCommandContractTest {
 
     @ParameterizedTest
     @ValueSource(strings = {
-        "{\"action\":\"deploy\",\"route_id\":\"r-1\",\"route_yaml\":\"name: r\\nquery: SELECT 1\"}",
         "{\"action\":\"execute\",\"route_id\":\"r-1\",\"parameters\":{\"db_name\":\"d\",\"db_host\":\"h\",\"db_port\":5432,"
             + "\"db_user\":\"u\",\"db_pass\":\"p\",\"sql\":\"SELECT 1\"}}",
         "{\"action\":\"execute\",\"route_id\":\"r-1\",\"parameters\":{\"db_port\":\"5432\",\"operation\":\"read\","

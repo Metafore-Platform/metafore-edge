@@ -75,6 +75,10 @@ public class RouteExecutorRoute extends RouteBuilder {
                 // Compass 3bb6be4e: the edge has no shell path; a command that carries shell_command is refused first.
                 Map<String, Object> result = ShellRefusal.check(config, action, routeId, cmd);
                 if (result == null) {
+                    // Compass f615b0a7: the edge loads no route code; a command carrying route_yaml is refused too.
+                    result = RouteYamlRefusal.check(config, action, routeId, cmd);
+                }
+                if (result == null) {
                     result = enforceCapability(action, routeId, cmd);
                 }
                 if (result != null) {
@@ -181,7 +185,6 @@ public class RouteExecutorRoute extends RouteBuilder {
     private Map<String, Object> handleExecute(String routeId, Map<String, Object> cmd) {
         Map<String, Object> params = (Map<String, Object>)
             cmd.getOrDefault("parameters", Collections.emptyMap());
-        String routeYaml = (String) cmd.getOrDefault("route_yaml", "");
 
         // adr-158 — MCP transport. Keyed on mcp_tool presence; executes a
         // JSON-RPC tool call against an MCP-native system with credentials
@@ -212,9 +215,6 @@ public class RouteExecutorRoute extends RouteBuilder {
         // classify the shape so the rejection message is specific, but no
         // raw-SQL command can reach the database.
         String legacySql = params != null ? (String) params.get("sql") : null;
-        if (legacySql == null && routeYaml != null) {
-            legacySql = RouteYamlExtractor.extractQuery(routeYaml);
-        }
         RouteYamlExtractor.PayloadKind kind =
             RouteYamlExtractor.classifyPayload(params, legacySql);
         switch (kind) {

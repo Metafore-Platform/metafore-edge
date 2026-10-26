@@ -17,24 +17,6 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class RouteExecutorRouteTest {
 
-    @Test
-    void extractQueryFromYaml() {
-        String yaml = "name: test-route\nquery: SELECT * FROM users\nparams: none";
-        assertEquals("SELECT * FROM users", RouteYamlExtractor.extractQuery(yaml));
-    }
-
-    @Test
-    void extractQueryMultiLine() {
-        String yaml = "query: >\n  SELECT *\n  FROM users\n- next_section";
-        assertEquals("SELECT * FROM users", RouteYamlExtractor.extractQuery(yaml));
-    }
-
-    @Test
-    void extractQueryNull() {
-        assertNull(RouteYamlExtractor.extractQuery(null));
-        assertNull(RouteYamlExtractor.extractQuery("no query here"));
-    }
-
     // ── Slice 33.1.0 — payload classification at dispatch boundary ──
 
     @Test

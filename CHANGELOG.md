@@ -1,5 +1,10 @@
 # metafore-edge changelog
 
+## Unreleased (development, v2) — the edge loads no route code
+
+- **A route command that carries `route_yaml` is refused** (Compass f615b0a7, adr-060, adr-096). `RouteYamlRefusal` runs right after `ShellRefusal`: the key at the top level or in `parameters`, whatever the action and the value, answers `status: rejected`, `error: unsupported_payload` with a WARN line (action and route id only, never the YAML, which could embed SQL). The edge never loaded such a route; its only use of the YAML was `RouteYamlExtractor.extractQuery`, a text search for `query:` that fed the payload classifier. That method and its use in `handleExecute` are gone. The platform stopped sending `route_yaml` (metafore-api #1663), so this closes the door for an older core or a stray publisher. `RouteYamlRefusalTest` pins it.
+- **The pinned `route_command` schema** is re-pinned to the metafore-api commit that drops `route_yaml` from it (`scripts/sync-contracts.sh`), and the contract test now refuses a command that carries it.
+
 ## Unreleased (development, v2) — the edge never logs a secret
 
 - **`log/Redactor` and `log/CommandLog`** (Compass 9ece454f, step 1). `RouteExecutorRoute` logged every route command at INFO with `${body}`, so `db_user` and `db_pass` were written to the pod log (and, shipped from there, to CloudWatch) on every command. The arrival line now prints the command with the VALUE of every credential-shaped field replaced by `***`: a name containing `pass`, `pwd`, `secret`, `token`, `credential`, `apikey`, `auth`, `bearer`, `cookie`, `jwt`, `private` or `signature`, or having `key`, `user`, `username`, `login` or `uid` as a whole word, at any depth (objects and arrays) and also `user:password@` and `?token=` inside text values. The rest of the line is kept. Text that is not a JSON object is never printed; only its length is.
