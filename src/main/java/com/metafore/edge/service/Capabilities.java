@@ -129,7 +129,7 @@ public final class Capabilities {
             Object op = params.get("operation");
             if (op instanceof String) {
                 String opStr = ((String) op).trim().toLowerCase();
-                if ("read".equals(opStr) || "select".equals(opStr)) {
+                if ("read".equals(opStr) || "select".equals(opStr) || "list_read".equals(opStr)) {
                     return "read";
                 }
                 if ("create".equals(opStr) || "update".equals(opStr)

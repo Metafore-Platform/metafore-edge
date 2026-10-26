@@ -10,6 +10,7 @@ import com.metafore.edge.message.MessageFactory;
 import com.metafore.edge.service.Capabilities;
 import com.metafore.edge.service.DataSourceRegistry;
 import com.metafore.edge.service.FhirTemplateExecutor;
+import com.metafore.edge.service.ListReadExecutor;
 import com.metafore.edge.service.McpExecutor;
 import com.metafore.edge.service.ShellExecutor;
 import com.metafore.edge.service.SqlExecutor;
@@ -287,6 +288,9 @@ public class RouteExecutorRoute extends RouteBuilder {
         // reads.
         if ("read".equals(operation)) {
             return executeRead(routeId, ds, params);
+        }
+        if ("list_read".equals(operation)) {   // adr-107 — one list, joins and counts, in one request
+            return ListReadExecutor.asRouteResult(config, routeId, ListReadExecutor.execute(ds, params));
         }
 
         // adr-196 — transactional record-write + change-event emit. The
