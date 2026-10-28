@@ -48,6 +48,9 @@ class ReplyTopicRoutesTest extends CamelTestSupport {
             a.replaceFromWith(from);
             a.weaveById(resultId).replace().to("mock:" + routeId + "-result");
             a.weaveById(replyId).replace().to("mock:" + routeId + "-reply");
+            if (routeId.startsWith("route-executor")) { // the refusal event (task 268f2e11) is not under test here
+                a.weaveById("refusal-event-publish").replace().to("mock:" + routeId + "-refusal");
+            }
         });
     }
 

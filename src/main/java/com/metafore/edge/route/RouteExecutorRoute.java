@@ -115,6 +115,9 @@ public class RouteExecutorRoute extends RouteBuilder {
 
                 exchange.getIn().setBody(result);
             })
+            // Compass 268f2e11: a typed refusal is also an event for core's audit trail (keys only, see RefusalEvent)
+            .process(exchange -> exchange.setProperty("mfRefusalEvent",
+                RefusalEvent.json(config, topics, exchange.getIn().getBody(Map.class))))
             .marshal().json()
             // one String the telemetry publish and the reply publish both send in full (a stream is read once)
             .convertBodyTo(String.class)
@@ -125,6 +128,11 @@ public class RouteExecutorRoute extends RouteBuilder {
                     // the topic goes in as a header on a FIXED endpoint, never into an endpoint URI built from the command
                     .setHeader(PahoConstants.CAMEL_PAHO_OVERRIDE_TOPIC, exchangeProperty("mfReplyTopic"))
                     .to("paho:" + topics.responsePrefix() + "reply?brokerUrl=" + config.brokerUrl()).id("route-reply-publish")
+            .end()
+            .choice()
+                .when(exchangeProperty("mfRefusalEvent").isNotNull())
+                    .setBody(exchangeProperty("mfRefusalEvent"))
+                    .to("paho:" + topics.telemetryEvents() + "?brokerUrl=" + config.brokerUrl()).id("refusal-event-publish")
             .end()
             .log("Route result published");
     }
@@ -484,13 +492,6 @@ public class RouteExecutorRoute extends RouteBuilder {
             r.put("template_id", templateId);
             return r;
         }
-    }
-
-    private static String str(Map<String, Object> params,
-                               String key1, String key2, String def) {
-        Object v = params.get(key1);
-        if (v == null) v = params.get(key2);
-        return v != null ? String.valueOf(v) : def;
     }
 
 }
