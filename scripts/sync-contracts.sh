@@ -3,7 +3,7 @@
 #
 #   scripts/sync-contracts.sh <metafore-api commit sha>
 #
-# Copies packages/contracts/mqtt/{route_command,route_result}.schema.json from Metafore-Platform/metafore-api at that
+# Copies packages/contracts/mqtt/{route_command,route_result,registration,edge_refusal}.schema.json from Metafore-Platform/metafore-api at that
 # commit into src/test/resources/schemas/ and rewrites src/test/resources/schemas/PIN (the commit and each file's
 # sha256). RouteCommandContractTest fails when the files and the PIN disagree, so a schema is never edited by hand.
 # Needs the GitHub CLI signed in with read access to metafore-api.
@@ -12,7 +12,7 @@ sha="${1:?usage: scripts/sync-contracts.sh <metafore-api commit sha>}"
 [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "the commit must be a full 40-character sha" >&2; exit 2; }
 dir="$(cd "$(dirname "$0")/.." && pwd)/src/test/resources/schemas"
 repo="Metafore-Platform/metafore-api"
-files=(route_command.schema.json route_result.schema.json registration.schema.json)
+files=(route_command.schema.json route_result.schema.json registration.schema.json edge_refusal.schema.json)
 for f in "${files[@]}"; do
   gh api -H "Accept: application/vnd.github.raw" "repos/$repo/contents/packages/contracts/mqtt/$f?ref=$sha" > "$dir/$f"
 done

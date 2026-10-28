@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "metafore/mqtt/edge_refusal",
+  "title": "Access Controller Refusal",
+  "description": "Published by the Access Controller to telemetry/{tenant_id}/{controller_id}/events when it refuses a command it will never run (Compass 268f2e11). Keys only: it names the command (route id and action) and the typed refusal, and carries no parameter value, no SQL, no connection detail and no credential. The reason is a fixed sentence per refusal_code.",
+  "type": "object",
+  "required": ["kind", "event_id", "controller_id", "tenant_id", "timestamp", "severity", "refusal_code", "action", "reason"],
+  "properties": {
+    "kind": { "const": "edge_refusal" },
+    "event_id": { "type": "string", "format": "uuid" },
+    "controller_id": { "type": "string" },
+    "tenant_id": { "type": "string" },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "severity": { "const": "warn" },
+    "refusal_code": {
+      "type": "string",
+      "enum": ["shell_not_supported", "unsupported_payload", "unsupported_mcp_transport", "unsupported_connection_auth"]
+    },
+    "route_id": { "type": "string", "maxLength": 200 },
+    "action": { "type": "string", "maxLength": 64 },
+    "reason": { "type": "string", "minLength": 1, "maxLength": 200 }
+  },
+  "additionalProperties": false
+}
