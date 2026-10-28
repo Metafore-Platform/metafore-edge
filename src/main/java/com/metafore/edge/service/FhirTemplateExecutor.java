@@ -2,6 +2,8 @@ package com.metafore.edge.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.io.IOException;
 import java.net.URI;
@@ -253,7 +255,33 @@ public final class FhirTemplateExecutor {
         long start, String baseUrl
     ) throws IOException, InterruptedException {
         HttpResponse<String> resp = get(baseUrl + "/metadata");
-        return wrapResponse(start, resp, "fhir.server.metadata");
+        return wrapResponse(start, resp, "fhir.server.metadata", true);
+    }
+
+    /**
+     * Compass 85d16fea: the CapabilityStatement of a real server is megabytes (HAPI's is 2 MB), more than the broker lets
+     * the edge publish, and the platform reads three things from it (fhirVersion, software.name, rest[].resource[].type).
+     * Only those are sent back, in the statement's own shape, so the platform's capture paths apply unchanged.
+     */
+    static JsonNode summarize(JsonNode statement) {
+        ObjectNode out = MAPPER.createObjectNode();
+        out.put("resourceType", "CapabilityStatement");
+        if (statement.path("fhirVersion").isTextual()) {
+            out.put("fhirVersion", statement.get("fhirVersion").asText());
+        }
+        if (statement.path("software").path("name").isTextual()) {
+            out.putObject("software").put("name", statement.get("software").get("name").asText());
+        }
+        ArrayNode rest = out.putArray("rest");
+        for (JsonNode r : statement.path("rest")) {
+            ArrayNode resources = rest.addObject().putArray("resource");
+            for (JsonNode res : r.path("resource")) {
+                if (res.path("type").isTextual()) {
+                    resources.addObject().put("type", res.get("type").asText());
+                }
+            }
+        }
+        return out;
     }
 
     private Map<String, Object> searchPatients(
@@ -287,9 +315,15 @@ public final class FhirTemplateExecutor {
         return sender.send(req);
     }
 
-    @SuppressWarnings("unchecked")
     private Map<String, Object> wrapResponse(
         long start, HttpResponse<String> resp, String templateId
+    ) throws IOException {
+        return wrapResponse(start, resp, templateId, false);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> wrapResponse(
+        long start, HttpResponse<String> resp, String templateId, boolean summary
     ) throws IOException {
         long latency = System.currentTimeMillis() - start;
         if (resp.statusCode() < 200 || resp.statusCode() >= 300) {
@@ -298,6 +332,9 @@ public final class FhirTemplateExecutor {
                 + ": " + truncate(resp.body()));
         }
         JsonNode json = MAPPER.readTree(resp.body());
+        if (summary) {
+            json = summarize(json);
+        }
         List<Map<String, Object>> data = new ArrayList<>();
         if (json.has("entry")) {
             for (JsonNode entry : json.get("entry")) {
