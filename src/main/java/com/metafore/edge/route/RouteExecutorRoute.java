@@ -121,6 +121,7 @@ public class RouteExecutorRoute extends RouteBuilder {
             .marshal().json()
             // one String the telemetry publish and the reply publish both send in full (a stream is read once)
             .convertBodyTo(String.class)
+            .process(ReplyCap.processor(config))
             .to("paho:" + topics.telemetryRouteResults()
                 + "?brokerUrl=" + config.brokerUrl()).id("route-result-publish")
             .choice()

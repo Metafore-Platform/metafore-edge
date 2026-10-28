@@ -40,6 +40,8 @@ public class DiscoveryRoute extends RouteBuilder {
                     config, UUID.randomUUID().toString(), "startup", capabilities));
             })
             .marshal().json()
+            .convertBodyTo(String.class)
+            .process(ReplyCap.processor(config))
             .to("paho:" + topics.telemetryDiscovery()
                 + "?brokerUrl=" + config.brokerUrl())
             .log("Startup discovery published");
@@ -78,6 +80,7 @@ public class DiscoveryRoute extends RouteBuilder {
             .marshal().json()
             // one String the telemetry publish and the reply publish both send in full (a stream is read once)
             .convertBodyTo(String.class)
+            .process(ReplyCap.processor(config))
             .to("paho:" + topics.telemetryDiscovery()
                 + "?brokerUrl=" + config.brokerUrl()).id("discovery-result-publish")
             // Discover correlation fix — also deliver to the command's
