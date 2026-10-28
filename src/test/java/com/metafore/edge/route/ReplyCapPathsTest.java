@@ -56,10 +56,14 @@ class ReplyCapPathsTest extends CamelTestSupport {
     }
 
     private String serve(int bytes) throws Exception {
+        return serve(bytes, 200);
+    }
+
+    private String serve(int bytes, int status) throws Exception {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/big", ex -> {
             byte[] body = "x".repeat(bytes).getBytes(StandardCharsets.UTF_8);
-            ex.sendResponseHeaders(200, body.length);
+            ex.sendResponseHeaders(status, body.length);
             ex.getResponseBody().write(body);
             ex.close();
         });
@@ -88,20 +92,37 @@ class ReplyCapPathsTest extends CamelTestSupport {
     }
 
     @Test
-    void aWriteBackAnswerOverTheLimitIsAnErrorOnBothTopics() throws Exception {
+    void aWriteBackThatSucceededStaysASuccessWhenItsAnswerIsOverTheLimit() throws Exception {
         advise();
         for (String m : new String[] {"wb-result", "wb-reply"}) getMockEndpoint("mock:" + m).expectedMessageCount(1);
-        template.sendBody("direct:write-back", "{\"action_id\":\"a-1\",\"method\":\"GET\",\"url\":\"" + serve(2 * 1024 * 1024)
-            + "\",\"response_topic\":\"" + OWN + "\"}");
+        template.sendBody("direct:write-back", "{\"action_id\":\"a-1\",\"method\":\"POST\",\"url\":\"" + serve(2 * 1024 * 1024, 201)
+            + "\",\"old_values\":{\"state\":\"open\"},\"new_values\":{\"state\":\"resolved\"},\"response_topic\":\"" + OWN + "\"}");
         for (String m : new String[] {"wb-result", "wb-reply"}) {
             getMockEndpoint("mock:" + m).assertIsSatisfied(10000);
             JsonNode out = body(m, 0);
             assertEquals("a-1", out.get("action_id").asText(), m);
-            assertEquals("error", out.get("status").asText(), m);
-            assertEquals(200, out.get("http_status").asInt(), m);
-            assertTrue(out.get("response_body").asText().startsWith("reply_too_large:"), out.toString());
+            assertEquals("success", out.get("status").asText(), "the write happened: " + out);
+            assertEquals(201, out.get("http_status").asInt(), m);
+            assertEquals("open", out.get("old_values").get("state").asText(), m);
+            assertEquals("resolved", out.get("new_values").get("state").asText(), m);
+            JsonNode inner = MAPPER.readTree(out.get("response_body").asText());   // valid JSON, as core parses it
+            assertEquals("reply_too_large", inner.get("error").asText());
+            assertEquals(400, inner.get("limit").asInt());
+            assertTrue(inner.get("size").asInt() > 2 * 1024 * 1024, inner.toString());
             assertTrue(out.toString().length() < 1000, "the answer is small");
         }
+    }
+
+    @Test
+    void aFailedWriteBackStaysAnErrorWithItsOwnStatus() throws Exception {
+        advise();
+        getMockEndpoint("mock:wb-result").expectedMessageCount(1);
+        template.sendBody("direct:write-back", "{\"action_id\":\"a-3\",\"method\":\"POST\",\"url\":\"" + serve(2 * 1024 * 1024, 500) + "\"}");
+        getMockEndpoint("mock:wb-result").assertIsSatisfied(10000);
+        JsonNode out = body("wb-result", 0);
+        assertEquals("error", out.get("status").asText());
+        assertEquals(500, out.get("http_status").asInt());
+        assertEquals("reply_too_large", MAPPER.readTree(out.get("response_body").asText()).get("error").asText());
     }
 
     @Test

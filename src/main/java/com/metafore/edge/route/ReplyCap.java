@@ -28,8 +28,8 @@ import java.util.Map;
  * <ul>
  *   <li>a route result: {@code status=error}, {@code error=reply_too_large}, the size and the limit in
  *       {@code error_details}, and the route id, action and template id;</li>
- *   <li>a write-back result: {@code status=error}, its {@code http_status}, and {@code response_body} that starts
- *       {@code reply_too_large:} (the schema has no error field);</li>
+ *   <li>a write-back result: unchanged but for {@code response_body}, which becomes the JSON
+ *       {@code {"error":"reply_too_large","size":N,"limit":M}}: the write happened, so its status stays what the call gave;</li>
  *   <li>a discovery result: the largest capabilities are replaced by {@code {status: failed, error: reply_too_large...}}
  *       until it fits, so the others still arrive.</li>
  * </ul>
@@ -68,8 +68,7 @@ final class ReplyCap {
             LOG.warn("A result of {} bytes is over the {}-byte limit: answering {} ({})", size, max, ERROR, kind(in));
             Object out;
             if (in.has("action_id")) {
-                out = MessageFactory.writeBackResult(config, in.path("action_id").asText(""), "error",
-                    in.path("http_status").asInt(0), ERROR + ": " + detail, null, null);
+                out = fitWriteBack((ObjectNode) in, max, size);
             } else if (in.has("run_id")) {
                 out = fitDiscovery(config, (ObjectNode) in, max, size);
             } else {
@@ -85,6 +84,23 @@ final class ReplyCap {
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("a result the edge just serialised reads back and serialises again", e);
         }
+    }
+
+    /**
+     * The write-back result as the call gave it: {@code status}, {@code http_status} and the old and new values are kept,
+     * and ONLY {@code response_body} is replaced, by JSON the platform can parse. The write itself happened: a 201 stays
+     * a success, and the platform must not read it as a failed write that could be run again. (If the old and new values
+     * alone are still over the limit they are dropped too: they only echo the command the platform sent.)
+     */
+    private static ObjectNode fitWriteBack(ObjectNode in, int max, int size) {
+        ObjectNode body = MAPPER.createObjectNode();
+        body.put("error", ERROR).put("size", size).put("limit", max);
+        in.put("response_body", body.toString());
+        if (in.toString().getBytes(StandardCharsets.UTF_8).length > max) {
+            in.remove("old_values");
+            in.remove("new_values");
+        }
+        return in;
     }
 
     /** The discovery result with its largest capabilities replaced by a failed capability until it fits. */
