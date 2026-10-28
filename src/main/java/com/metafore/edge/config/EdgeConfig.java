@@ -23,6 +23,8 @@ public final class EdgeConfig {
     private final long heartbeatIntervalMs;
     private final long discoveryDelayMs;
     private final int defaultRowFetchSize;
+    /** Compass 85d16fea: the largest result the edge publishes (the broker drops the connection of a bigger packet). */
+    private final int replyMaxBytes;
     /** Phase 14.9 / ETA.T1 — auto-detected edge process topology.
      *  Wire value (kebab-case) is what ships on the registration
      *  payload's {@code runtime} field; {@link EdgeRuntime#UNKNOWN}
@@ -42,6 +44,8 @@ public final class EdgeConfig {
      * pagination + LIMIT N+1 remains the primary mechanism; this is
      * the catastrophe brake.
      */
+    /** Half of EMQX's default max_packet_size (1 MB): room for the MQTT header and for a broker set lower. */
+    public static final int DEFAULT_REPLY_MAX_BYTES = 512 * 1024;
     public static final int DEFAULT_ROW_FETCH_SIZE = 500;
 
     /**
@@ -93,6 +97,10 @@ public final class EdgeConfig {
             env.getOrDefault("DEFAULT_ROW_FETCH_SIZE",
                 Integer.toString(DEFAULT_ROW_FETCH_SIZE))
         );
+        this.replyMaxBytes = Integer.parseInt(env.getOrDefault("REPLY_MAX_BYTES", Integer.toString(DEFAULT_REPLY_MAX_BYTES)));
+        if (replyMaxBytes < 256) {
+            throw new IllegalArgumentException("REPLY_MAX_BYTES must be at least 256, got " + replyMaxBytes);
+        }
         // Phase 14.9 — detect once at construction. Probe failures
         // never throw — the detect() contract returns UNKNOWN on any
         // ambiguity. Hints map carries the diagnostic context.
@@ -194,6 +202,7 @@ public final class EdgeConfig {
     public long heartbeatIntervalMs()  { return heartbeatIntervalMs; }
     public long discoveryDelayMs()     { return discoveryDelayMs; }
     public int defaultRowFetchSize()   { return defaultRowFetchSize; }
+    public int replyMaxBytes()         { return replyMaxBytes; }
 
     /** Phase 14.9 / ETA.T1 — wire string form of the runtime
      *  classification, ready to drop on the registration payload's
